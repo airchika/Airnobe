@@ -1,0 +1,28 @@
+{
+  "name": "@airnobe/epub-normalizer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "airnobe-convert": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "convert": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@airnobe/book-format": "0.1.0",
+    "@xmldom/xmldom": "^0.8.11",
+    "jszip": "^3.10.1"
+  }
+}

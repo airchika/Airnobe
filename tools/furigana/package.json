@@ -1,0 +1,23 @@
+{
+  "name": "@airnobe/furigana",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "airnobe-furigana": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "furigana": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@airnobe/book-format": "0.1.0",
+    "@airnobe/epub-normalizer": "0.1.0",
+    "kuromoji": "^0.1.2"
+  },
+  "devDependencies": {
+    "@types/kuromoji": "^0.1.3"
+  }
+}

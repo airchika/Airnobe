@@ -1,0 +1,5 @@
+font/
+node_modules/
+dist/
+coverage/
+.airnobe-*/
