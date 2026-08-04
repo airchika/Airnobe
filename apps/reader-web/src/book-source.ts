@@ -1,4 +1,5 @@
 import {
+  AIRNOBE_FORMAT_VERSION,
   BookDocumentSchema,
   BookManifestSchema,
   ConversionReportSchema,
@@ -69,6 +70,31 @@ async function parseJsonFile<T>(file: File | undefined, parser: { parse(value: u
     return parser.parse(value);
   } catch (error) {
     throw new Error(`${label} 不符合 Airnobe 格式：${(error as Error).message}`);
+  }
+}
+
+async function parseBookFile(file: File | undefined): Promise<BookManifest> {
+  if (!file) throw new Error("书籍缺少 book.json。");
+  let value: unknown;
+  try {
+    value = JSON.parse(await file.text());
+  } catch (error) {
+    throw new Error(`book.json 不是有效 JSON：${(error as Error).message}`);
+  }
+  if (
+    typeof value === "object"
+    && value !== null
+    && "format" in value
+    && (value as { format?: unknown }).format === "airnobe-book"
+    && "version" in value
+    && (value as { version?: unknown }).version !== AIRNOBE_FORMAT_VERSION
+  ) {
+    throw new Error(`这是旧版 Airnobe 转换结果（格式版本 ${(value as { version?: unknown }).version}）。请重新导入原始 EPUB。`);
+  }
+  try {
+    return BookManifestSchema.parse(value);
+  } catch (error) {
+    throw new Error(`book.json 不符合 Airnobe 格式：${(error as Error).message}`);
   }
 }
 
@@ -152,7 +178,7 @@ export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBo
     fileByPath.set(relativePath, file);
   }
 
-  const book = await parseJsonFile(fileByPath.get("book.json"), BookManifestSchema, "book.json");
+  const book = await parseBookFile(fileByPath.get("book.json"));
   const documents: BookDocument[] = [];
   for (const entry of book.readingOrder) {
     documents.push(await parseJsonFile(fileByPath.get(entry.path), BookDocumentSchema, entry.path));
@@ -191,9 +217,9 @@ export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBo
   );
 }
 
-export function hasGeneratedRuby(book: LoadedBook): boolean {
+export function hasAssistedRuby(book: LoadedBook): boolean {
   const visit = (nodes: InlineNode[]): boolean => nodes.some((node) => {
-    if (node.type === "ruby") return node.origin === "generated";
+    if (node.type === "ruby") return node.origin !== "source";
     if (node.type === "emphasis" || node.type === "link") return visit(node.children);
     return false;
   });

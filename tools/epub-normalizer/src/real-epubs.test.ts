@@ -20,6 +20,16 @@ run("local real EPUB regression", () => {
       const result = await convertEpubBytes(await readFile(resolve(repository, name)), name);
       expect(result.report.metrics.parallelBlockCount, name).toBe(expectedPairs);
       expect(result.report.metrics.sourceRubyCount, name).toBe(expectedRubies);
+      const illustrationPaths = name === "kokorokonekuto.epub"
+        ? ["text/part0000.html", "text/part0001.html", "text/part0002.html", "text/part0003.html", "text/part0004.html"]
+        : name === "mimozanoGaoBai.epub"
+          ? ["text/part0001.html", "text/part0002.html", "text/part0003.html", "text/part0004.html", "text/part0006.html"]
+          : [];
+      for (const sourcePath of illustrationPaths) {
+        const document = result.documents.find((candidate) => candidate.sourcePath === sourcePath);
+        expect(document?.role, `${name}:${sourcePath}`).toBe("illustration");
+        expect(document?.blocks.every((block) => block.type === "image"), `${name}:${sourcePath}`).toBe(true);
+      }
       pairs += result.report.metrics.parallelBlockCount;
       rubies += result.report.metrics.sourceRubyCount;
     }

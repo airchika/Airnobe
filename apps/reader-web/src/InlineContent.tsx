@@ -3,14 +3,14 @@ import type { InlineNode, LinkTarget } from "@airnobe/book-format";
 
 interface InlineContentProps {
   nodes: InlineNode[];
-  showGeneratedRuby: boolean;
+  showAssistedRuby: boolean;
   assetUrlById: Map<string, string>;
   onInternalLink(target: Extract<LinkTarget, { kind: "internal" }>): void;
 }
 
 export function InlineContent({
   nodes,
-  showGeneratedRuby,
+  showAssistedRuby,
   assetUrlById,
   onInternalLink,
 }: InlineContentProps): ReactNode {
@@ -20,7 +20,7 @@ export function InlineContent({
       case "text":
         return <Fragment key={key}>{node.value}</Fragment>;
       case "ruby": {
-        if (node.origin === "generated" && !showGeneratedRuby) {
+        if (node.origin !== "source" && !showAssistedRuby) {
           return <Fragment key={key}>{node.segments.map((segment) => segment.base).join("")}</Fragment>;
         }
         return (
@@ -37,7 +37,7 @@ export function InlineContent({
         const content = (
           <InlineContent
             nodes={node.children}
-            showGeneratedRuby={showGeneratedRuby}
+            showAssistedRuby={showAssistedRuby}
             assetUrlById={assetUrlById}
             onInternalLink={onInternalLink}
           />
@@ -58,7 +58,7 @@ export function InlineContent({
         const content = (
           <InlineContent
             nodes={node.children}
-            showGeneratedRuby={showGeneratedRuby}
+            showAssistedRuby={showAssistedRuby}
             assetUrlById={assetUrlById}
             onInternalLink={onInternalLink}
           />

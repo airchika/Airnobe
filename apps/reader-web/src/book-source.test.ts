@@ -28,4 +28,13 @@ describe("loadBookFromFiles", () => {
   it("rejects a selection without book.json", async () => {
     await expect(loadBookFromFiles([directoryFile("documents/0000.json", "{}")])).rejects.toThrow(/没有 book\.json/);
   });
+
+  it("asks the user to reimport an old converted-book directory", async () => {
+    const demo = createDemoBook();
+    const oldBook = { ...demo.book, version: 1 };
+    await expect(loadBookFromFiles([
+      directoryFile("book.json", JSON.stringify(oldBook)),
+      directoryFile("documents/0000.json", JSON.stringify(demo.documents[0])),
+    ])).rejects.toThrow(/旧版.*重新导入原始 EPUB/);
+  });
 });

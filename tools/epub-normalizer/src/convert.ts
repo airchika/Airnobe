@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { BookDocument, BookManifest, ConversionReport } from "@airnobe/book-format";
+import { AIRNOBE_FORMAT_VERSION, type BookDocument, type BookManifest, type ConversionReport } from "@airnobe/book-format";
 import JSZip from "jszip";
 import {
   AssetRegistry,
@@ -63,7 +63,7 @@ export async function convertEpubBytes(bytes: Uint8Array, sourceFileName: string
   const bookId = stableId("book", `${sourceSha256}:${packageInfo.uniqueIdentifier}`);
   const book: BookManifest = {
     format: "airnobe-book",
-    version: 1,
+    version: AIRNOBE_FORMAT_VERSION,
     id: bookId,
     source: {
       fileName: basename(sourceFileName),
@@ -103,6 +103,7 @@ export async function convertEpubBytes(bytes: Uint8Array, sourceFileName: string
       textBlockCount: state.textBlockCount,
       parallelBlockCount: state.parallelBlockCount,
       sourceRubyCount: state.sourceRubyCount,
+      reusedRubyCount: 0,
       generatedRubyCount: 0,
       assetCount: assetPayloads.length,
       unclassifiedTextCount: state.unclassifiedTextCount,

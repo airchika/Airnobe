@@ -65,6 +65,7 @@ export function deriveFurigana(base: ConversionResult, tokenizer: TokenizerLike)
     dictionary: DICTIONARY_ID,
   };
   report.metrics.generatedRubyCount = stats.generatedRubyCount;
+  report.metrics.reusedRubyCount = stats.reusedRubyCount;
   if (stats.skippedLowConfidenceCount > 0) {
     report.warnings.push({
       code: "FURIGANA_LOW_CONFIDENCE_SKIPPED",

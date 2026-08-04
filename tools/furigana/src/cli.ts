@@ -40,6 +40,7 @@ export async function runFuriganaCli(args: string[]): Promise<number> {
   try {
     const result = await deriveFuriganaDirectory(options.input, options.output, options.force);
     console.log(`Derived: ${result.book.metadata.title || result.book.source.fileName}`);
+    console.log(`Reused ruby: ${result.report.metrics.reusedRubyCount}`);
     console.log(`Generated ruby: ${result.report.metrics.generatedRubyCount}`);
     console.log(`Warnings: ${result.report.warnings.length}`);
     console.log(`Output: ${options.output}`);

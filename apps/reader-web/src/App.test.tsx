@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
 import { createDemoBook } from "./demo-book.js";
+import { DEFAULT_READER_SETTINGS } from "./reader-settings.js";
 
 describe("App", () => {
   afterEach(() => {
@@ -21,19 +22,25 @@ describe("App", () => {
   it("imports a selected EPUB through the local service", async () => {
     const user = userEvent.setup();
     const demo = createDemoBook();
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ bookId: "0123456789abcdef" }), {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/settings") return new Response(JSON.stringify(DEFAULT_READER_SETTINGS), {
         status: 200,
         headers: { "content-type": "application/json" },
-      }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+      });
+      if (url === "/api/import-epub") return new Response(JSON.stringify({ bookId: "0123456789abcdef" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+      return new Response(JSON.stringify({
         book: demo.book,
         documents: demo.documents,
         report: demo.report,
       }), {
         status: 200,
         headers: { "content-type": "application/json" },
-      }));
+      });
+    });
     render(<App />);
     await user.upload(
       screen.getByLabelText("选择 EPUB 文件"),

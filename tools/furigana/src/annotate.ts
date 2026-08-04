@@ -25,6 +25,7 @@ interface Range {
 
 interface Annotation extends Range {
   reading: string;
+  origin: "reused" | "generated";
 }
 
 interface FlatContent {
@@ -38,6 +39,7 @@ interface PositionedToken extends Range {
 }
 
 export interface AnnotationStats {
+  reusedRubyCount: number;
   generatedRubyCount: number;
   skippedLowConfidenceCount: number;
 }
@@ -114,7 +116,11 @@ function isKana(character: string): boolean {
   return /^[\u3040-\u30ffー]$/u.test(character);
 }
 
-function annotationNodes(surface: string, rawReading: string): InlineNode[] {
+function annotationNodes(
+  surface: string,
+  rawReading: string,
+  origin: "reused" | "generated",
+): InlineNode[] {
   const reading = katakanaToHiragana(rawReading);
   let prefixLength = 0;
   while (
@@ -140,7 +146,7 @@ function annotationNodes(surface: string, rawReading: string): InlineNode[] {
   const prefix = surface.slice(0, prefixLength);
   const suffix = suffixLength ? surface.slice(surface.length - suffixLength) : "";
   if (prefix) nodes.push({ type: "text", value: prefix });
-  nodes.push({ type: "ruby", segments: [{ base: surfaceCore, reading: readingCore }], origin: "generated" });
+  nodes.push({ type: "ruby", segments: [{ base: surfaceCore, reading: readingCore }], origin });
   if (suffix) nodes.push({ type: "text", value: suffix });
   return nodes;
 }
@@ -154,7 +160,7 @@ function transformNodes(nodes: InlineNode[], annotationsByLeaf: Map<InlineNode, 
       for (const annotation of annotations) {
         if (annotation.start > cursor) output.push({ type: "text", value: node.value.slice(cursor, annotation.start) });
         const surface = node.value.slice(annotation.start, annotation.end);
-        output.push(...annotationNodes(surface, annotation.reading));
+        output.push(...annotationNodes(surface, annotation.reading, annotation.origin));
         cursor = annotation.end;
       }
       if (cursor < node.value.length) output.push({ type: "text", value: node.value.slice(cursor) });
@@ -171,13 +177,21 @@ function transformNodes(nodes: InlineNode[], annotationsByLeaf: Map<InlineNode, 
 
 function sourceReadingMap(documents: BookDocument[]): Map<string, string> {
   const readings = new Map<string, Set<string>>();
+  const collect = (base: string, reading: string): void => {
+    if (!base || !reading) return;
+    const set = readings.get(base) ?? new Set<string>();
+    set.add(katakanaToHiragana(reading));
+    readings.set(base, set);
+  };
   const visit = (nodes: InlineNode[]): void => {
     for (const node of nodes) {
       if (node.type === "ruby" && node.origin === "source") {
-        for (const segment of node.segments) {
-          const set = readings.get(segment.base) ?? new Set<string>();
-          set.add(segment.reading);
-          readings.set(segment.base, set);
+        for (const segment of node.segments) collect(segment.base, segment.reading);
+        if (node.segments.length > 1) {
+          collect(
+            node.segments.map((segment) => segment.base).join(""),
+            node.segments.map((segment) => segment.reading).join(""),
+          );
         }
       } else if (node.type === "emphasis" || node.type === "link") visit(node.children);
     }
@@ -193,6 +207,7 @@ function sourceReadingMap(documents: BookDocument[]): Map<string, string> {
 export function annotateDocuments(documents: BookDocument[], tokenizer: TokenizerLike): AnnotationStats {
   const reusable = sourceReadingMap(documents);
   const reusableBases = [...reusable.keys()].sort((left, right) => right.length - left.length);
+  let reusedRubyCount = 0;
   let generatedRubyCount = 0;
   let skippedLowConfidenceCount = 0;
   for (const document of documents) {
@@ -219,7 +234,7 @@ export function annotateDocuments(documents: BookDocument[], tokenizer: Tokenize
             if (end !== current.start + base.length) continue;
             const range = { start: current.start, end };
             if (overlaps(range, flat.protectedRanges) || !containingLeaf(range, flat.leaves)) continue;
-            selected = { ...range, reading: reusable.get(base) as string };
+            selected = { ...range, reading: reusable.get(base) as string, origin: "reused" };
             consumedTokens = cursor - index + 1;
             break;
           }
@@ -230,15 +245,26 @@ export function annotateDocuments(documents: BookDocument[], tokenizer: Tokenize
               continue;
             }
             if (!containingLeaf(current, flat.leaves)) continue;
-            selected = { start: current.start, end: current.end, reading: current.token.reading };
+            selected = {
+              start: current.start,
+              end: current.end,
+              reading: current.token.reading,
+              origin: "generated",
+            };
           }
           const leaf = containingLeaf(selected, flat.leaves);
           if (!leaf) continue;
-          const local = { start: selected.start - leaf.start, end: selected.end - leaf.start, reading: selected.reading };
+          const local = {
+            start: selected.start - leaf.start,
+            end: selected.end - leaf.start,
+            reading: selected.reading,
+            origin: selected.origin,
+          };
           const list = annotationsByLeaf.get(leaf.node) ?? [];
           list.push(local);
           annotationsByLeaf.set(leaf.node, list);
-          generatedRubyCount += 1;
+          if (selected.origin === "reused") reusedRubyCount += 1;
+          else generatedRubyCount += 1;
           index += consumedTokens - 1;
         }
         for (const annotations of annotationsByLeaf.values()) annotations.sort((left, right) => left.start - right.start);
@@ -246,5 +272,5 @@ export function annotateDocuments(documents: BookDocument[], tokenizer: Tokenize
       }
     }
   }
-  return { generatedRubyCount, skippedLowConfidenceCount };
+  return { reusedRubyCount, generatedRubyCount, skippedLowConfidenceCount };
 }

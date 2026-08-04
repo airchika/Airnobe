@@ -186,7 +186,11 @@ function collectCandidates(document: Document): { candidates: Candidate[]; stand
     if (isHidden(element) || ["script", "style", "nav", "noscript", "template"].includes(localName(element))) return;
     const name = localName(element);
     if (["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "figcaption"].includes(name)) {
-      if (normalizedText(element) || descendantElements(element, "img").length > 0) {
+      const text = normalizedText(element);
+      const images = descendantElements(element, "img");
+      if (!text && images.length > 0) {
+        for (const image of images) standalone.push({ element: image, nodeIndex: nodeIndex++ });
+      } else if (text || images.length > 0) {
         candidates.push({
           element,
           nodeIndex: nodeIndex++,

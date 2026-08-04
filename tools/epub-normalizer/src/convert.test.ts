@@ -74,6 +74,31 @@ describe("EPUB normalizer", () => {
     expect(new Set(languages)).toEqual(new Set(["zh-CN"]));
   });
 
+  it.each([
+    ["direct image", `<p id="start"><img src="../Images/pic.png" alt="插画"/></p>`],
+    ["linked image", `<p id="start"><a href="#full"><img src="../Images/pic.png" alt="插画"/></a></p>`],
+    ["wrapped image", `<p id="start"><span class="fit"><img src="../Images/pic.png" alt="插画"/></span></p>`],
+  ])("promotes an image-only paragraph with %s to a block illustration", async (_name, bodyMarkup) => {
+    const result = await convertEpubBytes(await makeEpubFixture({ bodyMarkup }), "image.epub");
+    expect(result.documents[0]?.role).toBe("illustration");
+    expect(result.documents[0]?.blocks).toHaveLength(1);
+    expect(result.documents[0]?.blocks[0]).toMatchObject({ type: "image", role: "illustration", alt: "插画" });
+  });
+
+  it("keeps an image mixed with paragraph text as an inline gaiji", async () => {
+    const bodyMarkup = `<p id="start">正文<img src="../Images/pic.png" alt="字"/>继续</p>`;
+    const result = await convertEpubBytes(await makeEpubFixture({ bodyMarkup }), "gaiji.epub");
+    const block = result.documents[0]?.blocks[0];
+    expect(block?.type).toBe("text");
+    if (block?.type !== "text") throw new Error("missing text block");
+    expect(block.variants[0]?.content).toContainEqual({
+      type: "image",
+      assetId: result.book.assets[0]?.id,
+      alt: "字",
+      role: "gaiji",
+    });
+  });
+
   it("rejects dangerous archive paths and malformed XML", async () => {
     const zip = new JSZip();
     zip.file("mimetype", "application/epub+zip");

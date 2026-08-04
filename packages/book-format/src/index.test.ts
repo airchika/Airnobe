@@ -15,4 +15,15 @@ describe("book format", () => {
     ]);
     expect(inlinePlainText(nodes)).toBe("今日は学校\nです");
   });
+
+  it("accepts publisher, reused, and dictionary-generated ruby origins", () => {
+    const origins = ["source", "reused", "generated"] as const;
+    for (const origin of origins) {
+      expect(InlineNodeSchema.parse({
+        type: "ruby",
+        origin,
+        segments: [{ base: "本", reading: "ほん" }],
+      })).toMatchObject({ origin });
+    }
+  });
 });

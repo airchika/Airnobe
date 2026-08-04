@@ -170,6 +170,12 @@ kbd {
   width: min(var(--reading-width), calc(100% - 44px));
   margin: 0 auto;
   padding-bottom: 22vh;
+  opacity: 1;
+  transition: opacity 100ms ease;
+}
+
+.reading-column--page-turning {
+  opacity: 0;
 }
 
 .virtual-book {
@@ -227,13 +233,24 @@ kbd {
 }
 
 .content-variant--ja {
+  position: relative;
   margin-top: 0.4em;
-  padding-left: 1em;
-  border-left: 2px solid rgba(215, 168, 92, 0.18);
   color: #8f999d;
   font-family: "Sarasa Gothic J", "Yu Gothic", sans-serif;
   font-size: clamp(15px, 2vw, 17px);
   line-height: 2.15;
+  opacity: 0.4;
+}
+
+.content-variant--ja::before {
+  position: absolute;
+  top: 0.25em;
+  bottom: 0.25em;
+  left: -1em;
+  width: 2px;
+  background: #d7a85c;
+  content: "";
+  pointer-events: none;
 }
 
 .text-block--heading .content-variant--zh,
@@ -260,6 +277,10 @@ rt {
 
 .ruby--generated rt {
   color: #86aeb0;
+}
+
+.ruby--reused rt {
+  color: #aa92cf;
 }
 
 .emphasis-sesame {
@@ -395,6 +416,34 @@ rt {
 
 .reader-menu button[aria-pressed="true"] b {
   color: var(--accent);
+}
+
+.reader-menu-setting {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 1fr auto 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  color: #cbd1d3;
+  font-size: 14px;
+}
+
+.reader-menu-setting input {
+  width: 42px;
+  box-sizing: border-box;
+  padding: 4px 3px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: #dce1e2;
+  background: rgba(255, 255, 255, 0.035);
+  font: inherit;
+  text-align: center;
+}
+
+.reader-menu-setting input:focus-visible {
+  outline: 0;
+  border-color: rgba(215, 168, 92, 0.6);
 }
 
 .loading-overlay {

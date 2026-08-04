@@ -7,6 +7,7 @@ interface FixtureOptions {
   pureChinese?: boolean;
   malformedChapter?: boolean;
   rubyMarkup?: string;
+  bodyMarkup?: string;
 }
 
 export async function makeEpubFixture(options: FixtureOptions = {}): Promise<Uint8Array> {
@@ -39,9 +40,13 @@ export async function makeEpubFixture(options: FixtureOptions = {}): Promise<Uin
   const source = `<p id="start" style="opacity:0.4;">日${rubyMarkup} 本</p>`;
   const translations = Array.from({ length: options.translations ?? 1 }, (_, index) => `<p>中文译文${index + 1}</p>`).join("");
   let body: string;
-  if (options.pureChinese) body = `<h1 id="start">第一章</h1><p>纯中文正文。</p>`;
+  if (options.bodyMarkup !== undefined) body = options.bodyMarkup;
+  else if (options.pureChinese) body = `<h1 id="start">第一章</h1><p>纯中文正文。</p>`;
   else body = (options.direction ?? "zh-jp") === "zh-jp" ? `${translations}${source}` : `${source}${translations}`;
-  const chapter = `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><section>${body}<p>保留 <strong>强调</strong><br/>换行 <img src="../Images/pic.png" alt="字"/></p><svg xmlns="http://www.w3.org/2000/svg"><image href="../Images/pic.png"/></svg></section></body></html>`;
+  const fixtureExtras = options.bodyMarkup === undefined
+    ? `<p>保留 <strong>强调</strong><br/>换行 <img src="../Images/pic.png" alt="字"/></p><svg xmlns="http://www.w3.org/2000/svg"><image href="../Images/pic.png"/></svg>`
+    : "";
+  const chapter = `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><section>${body}${fixtureExtras}</section></body></html>`;
   zip.file("OPS/Text/chapter.xhtml", options.malformedChapter ? chapter.replace("</body>", "") : chapter);
   zip.file("OPS/Images/pic.png", new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });

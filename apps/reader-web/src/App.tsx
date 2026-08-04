@@ -2,12 +2,20 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { BookReader } from "./BookReader.js";
 import { importEpubFile, loadBookFromFiles, type LoadedBook } from "./book-source.js";
 import { createDemoBook } from "./demo-book.js";
+import {
+  cloneReaderSettings,
+  DEFAULT_READER_SETTINGS,
+  loadReaderSettings,
+  saveReaderSettings,
+  type ReaderSettings,
+} from "./reader-settings.js";
 
 export function App() {
   const initialDemo = new URLSearchParams(window.location.search).get("demo") === "1";
   const [loaded, setLoaded] = useState<LoadedBook | undefined>(() => initialDemo ? createDemoBook() : undefined);
   const [loading, setLoading] = useState<string>();
   const [error, setError] = useState<string>();
+  const [settings, setSettings] = useState<ReaderSettings>(() => cloneReaderSettings(DEFAULT_READER_SETTINGS));
   const epubInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
   const loadedRef = useRef(loaded);
@@ -18,7 +26,29 @@ export function App() {
 
   useEffect(() => () => loadedRef.current?.dispose(), []);
 
+  useEffect(() => {
+    let active = true;
+    void loadReaderSettings()
+      .then((next) => {
+        if (active) setSettings(next);
+      })
+      .catch((settingsError) => {
+        if (active) setError((settingsError as Error).message);
+      });
+    return () => { active = false; };
+  }, []);
+
   const openEpubPicker = (): void => epubInputRef.current?.click();
+
+  const saveSettings = async (next: ReaderSettings): Promise<void> => {
+    try {
+      setError(undefined);
+      setSettings(await saveReaderSettings(next));
+    } catch (settingsError) {
+      setError((settingsError as Error).message);
+      throw settingsError;
+    }
+  };
 
   const installBook = (next: LoadedBook): void => {
     setLoaded((current) => {
@@ -79,7 +109,13 @@ export function App() {
         {...directoryAttributes}
       />
       {loaded
-        ? <BookReader key={loaded.book.id} loaded={loaded} onChooseBook={openEpubPicker} />
+        ? <BookReader
+            key={loaded.book.id}
+            loaded={loaded}
+            onChooseBook={openEpubPicker}
+            settings={settings}
+            onSaveSettings={saveSettings}
+          />
         : (
           <main className="welcome-screen">
             <div className="welcome-card">
@@ -92,6 +128,7 @@ export function App() {
                 <span><kbd>Q</kbd> 日文</span>
                 <span><kbd>E</kbd> 注音</span>
                 <span><kbd>W</kbd><kbd>S</kbd> 段落</span>
+                <span><kbd>R</kbd><kbd>F</kbd> 顶部段落</span>
                 <span><kbd>A</kbd><kbd>D</kbd> 翻页</span>
               </div>
             </div>

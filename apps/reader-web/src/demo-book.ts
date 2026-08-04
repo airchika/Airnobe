@@ -64,6 +64,8 @@ const document: BookDocument = {
           order: 0,
           content: [
             { type: "text", value: "彼女は" },
+            { type: "ruby", origin: "reused", segments: [{ base: "扉", reading: "とびら" }] },
+            { type: "text", value: "と" },
             { type: "ruby", origin: "generated", segments: [{ base: "窓", reading: "まど" }] },
             { type: "text", value: "を開け、" },
             { type: "emphasis", style: "sesame", children: [{ type: "text", value: "新しい風" }] },
@@ -111,7 +113,7 @@ const document: BookDocument = {
 
 const book: BookManifest = {
   format: "airnobe-book",
-  version: 1,
+  version: 2,
   id: "book-demo",
   source: {
     fileName: "demo.epub",
@@ -146,6 +148,7 @@ const report: ConversionReport = {
     textBlockCount: 4,
     parallelBlockCount: 4,
     sourceRubyCount: 1,
+    reusedRubyCount: 1,
     generatedRubyCount: 1,
     assetCount: 0,
     unclassifiedTextCount: 0,

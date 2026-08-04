@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const AIRNOBE_FORMAT = "airnobe-book" as const;
-export const AIRNOBE_FORMAT_VERSION = 1 as const;
+export const AIRNOBE_FORMAT_VERSION = 2 as const;
 
 function isPortableRelativePath(value: string): boolean {
   return !value.includes("\\")
@@ -40,7 +40,7 @@ export type InlineNode =
   | {
       type: "ruby";
       segments: Array<{ base: string; reading: string }>;
-      origin: "source" | "generated";
+      origin: "source" | "reused" | "generated";
     }
   | {
       type: "emphasis";
@@ -60,7 +60,7 @@ export const InlineNodeSchema: z.ZodType<InlineNode> = z.lazy(() =>
         base: z.string().min(1),
         reading: z.string().min(1),
       }).strict()).min(1),
-      origin: z.enum(["source", "generated"]),
+      origin: z.enum(["source", "reused", "generated"]),
     }).strict(),
     z.object({
       type: z.literal("emphasis"),
@@ -229,6 +229,7 @@ export const ConversionReportSchema = z.object({
     textBlockCount: z.number().int().nonnegative(),
     parallelBlockCount: z.number().int().nonnegative(),
     sourceRubyCount: z.number().int().nonnegative(),
+    reusedRubyCount: z.number().int().nonnegative(),
     generatedRubyCount: z.number().int().nonnegative(),
     assetCount: z.number().int().nonnegative(),
     unclassifiedTextCount: z.number().int().nonnegative(),

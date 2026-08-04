@@ -8,23 +8,25 @@ import type {
   LinkTarget,
   TextBlock,
 } from "@airnobe/book-format";
-import { hasGeneratedRuby, type LoadedBook } from "./book-source.js";
+import { hasAssistedRuby, type LoadedBook } from "./book-source.js";
 import { InlineContent } from "./InlineContent.js";
+import { isNavigationStepCount, type ReaderSettings } from "./reader-settings.js";
 
 interface BookReaderProps {
   loaded: LoadedBook;
   onChooseBook(): void;
+  settings: ReaderSettings;
+  onSaveSettings(settings: ReaderSettings): Promise<void>;
 }
 
 interface ReadingAnchor {
   id: string;
   top: number;
-  bottom: number;
 }
 
 type ReadingEdge = "top" | "bottom";
 
-interface ReaderRow {
+export interface ReaderRow {
   block: BlockNode;
   documentId: string;
   documentRole: BookDocument["role"];
@@ -33,6 +35,8 @@ interface ReaderRow {
 
 const READING_EDGE = 24;
 const OVERSCAN = 8;
+const PAGE_TURN_FADE_OUT_MS = 100;
+const PAGE_TURN_FADE_IN_MS = 120;
 
 export function captureReadingAnchor(edge: ReadingEdge = "top"): ReadingAnchor | undefined {
   const elements = [...document.querySelectorAll<HTMLElement>("[data-reading-anchor]")];
@@ -50,8 +54,7 @@ export function captureReadingAnchor(edge: ReadingEdge = "top"): ReadingAnchor |
       .sort((left, right) => right.getBoundingClientRect().top - left.getBoundingClientRect().top)[0];
     const element = containing ?? previous ?? elements[0];
     if (!element?.id) return undefined;
-    const rect = element.getBoundingClientRect();
-    return { id: element.id, top: rect.top, bottom: rect.bottom };
+    return { id: element.id, top: element.getBoundingClientRect().top };
   }
   const containing = elements
     .filter((element) => {
@@ -64,8 +67,7 @@ export function captureReadingAnchor(edge: ReadingEdge = "top"): ReadingAnchor |
     .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)[0];
   const element = containing ?? next ?? elements.at(-1);
   if (!element?.id) return undefined;
-  const rect = element.getBoundingClientRect();
-  return { id: element.id, top: rect.top, bottom: rect.bottom };
+  return { id: element.id, top: element.getBoundingClientRect().top };
 }
 
 function restoreReadingAnchor(anchor: ReadingAnchor | undefined): void {
@@ -115,20 +117,50 @@ function measureMountedRows(virtualizer: Virtualizer<Window, HTMLElement>): void
   }
 }
 
-export function BookReader({ loaded, onChooseBook }: BookReaderProps) {
+function isNavigationRow(row: ReaderRow | undefined): boolean {
+  return row?.block.type === "text" || row?.block.type === "image";
+}
+
+export function findNavigationTarget(
+  rows: ReaderRow[],
+  currentIndex: number | undefined,
+  direction: -1 | 1,
+  textSteps: number,
+): number | undefined {
+  let index = currentIndex === undefined ? (direction > 0 ? -1 : rows.length) : currentIndex;
+  let remainingTextSteps = textSteps;
+  let passedText = false;
+  let lastNavigable: number | undefined;
+  while (true) {
+    index += direction;
+    const row = rows[index];
+    if (!row) return lastNavigable;
+    if (row.block.type === "divider") continue;
+    if (row.block.type === "image") return passedText ? lastNavigable : index;
+    lastNavigable = index;
+    passedText = true;
+    remainingTextSteps -= 1;
+    if (remainingTextSteps === 0) return index;
+  }
+}
+
+export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: BookReaderProps) {
   const [showJapanese, setShowJapanese] = useState(false);
-  const [showGeneratedRuby, setShowGeneratedRuby] = useState(false);
+  const [showAssistedRuby, setShowAssistedRuby] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [navigation, setNavigation] = useState(settings.navigation);
+  const [backwardInput, setBackwardInput] = useState(String(settings.navigation.backwardTextSteps));
+  const [forwardInput, setForwardInput] = useState(String(settings.navigation.forwardTextSteps));
   const firstMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const generatedAvailable = useMemo(() => hasGeneratedRuby(loaded), [loaded]);
-  const renderGeneratedRuby = showGeneratedRuby && generatedAvailable;
+  const pageTurnInProgressRef = useRef(false);
+  const pageTurnTimerRef = useRef<number | undefined>(undefined);
+  const pageTurnReleaseTimerRef = useRef<number | undefined>(undefined);
+  const [pageTurning, setPageTurning] = useState(false);
+  const assistedAvailable = useMemo(() => hasAssistedRuby(loaded), [loaded]);
+  const renderAssistedRuby = showAssistedRuby && assistedAvailable;
   const rows = useMemo(() => flattenDocuments(loaded.documents), [loaded.documents]);
   const rowIndexByBlockId = useMemo(
     () => new Map(rows.map((row, index) => [row.block.id, index])),
-    [rows],
-  );
-  const textRowIndices = useMemo(
-    () => rows.flatMap((row, index) => row.block.type === "text" ? [index] : []),
     [rows],
   );
 
@@ -152,67 +184,80 @@ export function BookReader({ loaded, onChooseBook }: BookReaderProps) {
     toggleWithAnchor(() => setShowJapanese((value) => !value));
   }, [toggleWithAnchor]);
 
-  const toggleGeneratedRuby = useCallback(() => {
-    if (!generatedAvailable) return;
-    toggleWithAnchor(() => setShowGeneratedRuby((value) => !value));
-  }, [generatedAvailable, toggleWithAnchor]);
+  const toggleAssistedRuby = useCallback(() => {
+    if (!assistedAvailable) return;
+    toggleWithAnchor(() => setShowAssistedRuby((value) => !value));
+  }, [assistedAvailable, toggleWithAnchor]);
 
-  const jumpTextBlock = useCallback((direction: -1 | 1) => {
-    if (textRowIndices.length === 0) return;
-    const anchor = captureReadingAnchor(direction < 0 ? "top" : "bottom");
+  useEffect(() => {
+    setNavigation(settings.navigation);
+    setBackwardInput(String(settings.navigation.backwardTextSteps));
+    setForwardInput(String(settings.navigation.forwardTextSteps));
+  }, [settings.navigation.backwardTextSteps, settings.navigation.forwardTextSteps]);
+
+  const jumpNavigationUnit = useCallback((
+    direction: -1 | 1,
+    edge: ReadingEdge,
+    textSteps: number,
+  ) => {
+    if (!isNavigationStepCount(textSteps) || !rows.some(isNavigationRow)) return;
+    const anchor = captureReadingAnchor(edge);
     const currentIndex = anchor ? rowIndexByBlockId.get(anchor.id) : undefined;
-    let targetIndex: number | undefined;
-    if (currentIndex === undefined) {
-      targetIndex = direction > 0 ? textRowIndices[0] : textRowIndices.at(-1);
-    } else if (direction > 0) {
-      targetIndex = textRowIndices.find((index) => index > currentIndex);
-    } else {
-      for (let index = textRowIndices.length - 1; index >= 0; index -= 1) {
-        const candidate = textRowIndices[index];
-        if (candidate !== undefined && candidate < currentIndex) {
-          targetIndex = candidate;
-          break;
-        }
-      }
-    }
+    const targetIndex = findNavigationTarget(rows, currentIndex, direction, textSteps);
     if (targetIndex !== undefined) {
-      virtualizer.scrollToIndex(targetIndex, { align: direction < 0 ? "start" : "end" });
+      virtualizer.scrollToIndex(targetIndex, { align: edge === "top" ? "start" : "end" });
     }
-  }, [rowIndexByBlockId, textRowIndices, virtualizer]);
+  }, [rowIndexByBlockId, rows, virtualizer]);
 
-  const pageTextBlocks = useCallback((direction: -1 | 1) => {
-    const fallback = (): void => window.scrollBy({
-      top: direction * window.innerHeight,
-      behavior: "smooth",
+  const turnPage = useCallback((direction: -1 | 1) => {
+    const distance = direction * window.innerHeight;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      window.scrollBy({ top: distance, behavior: "instant" });
+      return;
+    }
+    if (pageTurnInProgressRef.current) return;
+    pageTurnInProgressRef.current = true;
+    setPageTurning(true);
+    pageTurnTimerRef.current = window.setTimeout(() => {
+      window.scrollBy({ top: distance, behavior: "instant" });
+      setPageTurning(false);
+      pageTurnReleaseTimerRef.current = window.setTimeout(() => {
+        pageTurnInProgressRef.current = false;
+      }, PAGE_TURN_FADE_IN_MS);
+    }, PAGE_TURN_FADE_OUT_MS);
+  }, []);
+
+  useEffect(() => () => {
+    if (pageTurnTimerRef.current !== undefined) window.clearTimeout(pageTurnTimerRef.current);
+    if (pageTurnReleaseTimerRef.current !== undefined) window.clearTimeout(pageTurnReleaseTimerRef.current);
+  }, []);
+
+  const commitNavigationInput = useCallback((kind: "backward" | "forward") => {
+    const raw = kind === "backward" ? backwardInput : forwardInput;
+    const parsed = Number(raw);
+    const previous = kind === "backward" ? navigation.backwardTextSteps : navigation.forwardTextSteps;
+    const restore = (): void => {
+      if (kind === "backward") setBackwardInput(String(previous));
+      else setForwardInput(String(previous));
+    };
+    if (!isNavigationStepCount(parsed)) {
+      restore();
+      return;
+    }
+    if (parsed === previous) return;
+    const next: ReaderSettings = {
+      version: 1,
+      navigation: {
+        ...navigation,
+        ...(kind === "backward" ? { backwardTextSteps: parsed } : { forwardTextSteps: parsed }),
+      },
+    };
+    setNavigation(next.navigation);
+    void onSaveSettings(next).catch(() => {
+      setNavigation(settings.navigation);
+      restore();
     });
-    if (textRowIndices.length === 0) {
-      fallback();
-      return;
-    }
-    const anchor = captureReadingAnchor(direction < 0 ? "top" : "bottom");
-    const currentIndex = anchor ? rowIndexByBlockId.get(anchor.id) : undefined;
-    if (!anchor || currentIndex === undefined) {
-      fallback();
-      return;
-    }
-    const incomplete = anchor.top < READING_EDGE
-      || anchor.bottom > window.innerHeight - READING_EDGE;
-    let targetIndex = incomplete ? currentIndex : undefined;
-    if (!incomplete && direction > 0) {
-      targetIndex = textRowIndices.find((index) => index > currentIndex);
-    } else if (!incomplete) {
-      for (let index = textRowIndices.length - 1; index >= 0; index -= 1) {
-        const candidate = textRowIndices[index];
-        if (candidate !== undefined && candidate < currentIndex) {
-          targetIndex = candidate;
-          break;
-        }
-      }
-    }
-    if (targetIndex !== undefined) {
-      virtualizer.scrollToIndex(targetIndex, { align: direction < 0 ? "end" : "start" });
-    }
-  }, [rowIndexByBlockId, textRowIndices, virtualizer]);
+  }, [backwardInput, forwardInput, navigation, onSaveSettings, settings]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -228,24 +273,30 @@ export function BookReader({ loaded, onChooseBook }: BookReaderProps) {
         toggleJapanese();
       } else if (key === "e" && !event.repeat) {
         event.preventDefault();
-        toggleGeneratedRuby();
+        toggleAssistedRuby();
       } else if (key === "w") {
         event.preventDefault();
-        jumpTextBlock(-1);
+        jumpNavigationUnit(-1, "bottom", navigation.backwardTextSteps);
       } else if (key === "s") {
         event.preventDefault();
-        jumpTextBlock(1);
+        jumpNavigationUnit(1, "bottom", navigation.forwardTextSteps);
+      } else if (key === "r") {
+        event.preventDefault();
+        jumpNavigationUnit(-1, "top", navigation.backwardTextSteps);
+      } else if (key === "f") {
+        event.preventDefault();
+        jumpNavigationUnit(1, "top", navigation.forwardTextSteps);
       } else if (key === "a") {
         event.preventDefault();
-        pageTextBlocks(-1);
+        turnPage(-1);
       } else if (key === "d") {
         event.preventDefault();
-        pageTextBlocks(1);
+        turnPage(1);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [jumpTextBlock, menuOpen, pageTextBlocks, toggleGeneratedRuby, toggleJapanese]);
+  }, [jumpNavigationUnit, menuOpen, navigation.backwardTextSteps, navigation.forwardTextSteps, toggleAssistedRuby, toggleJapanese, turnPage]);
 
   useEffect(() => {
     if (menuOpen) firstMenuButtonRef.current?.focus();
@@ -273,7 +324,7 @@ export function BookReader({ loaded, onChooseBook }: BookReaderProps) {
         setMenuOpen(true);
       }}
     >
-      <main className="reading-column">
+      <main className={`reading-column${pageTurning ? " reading-column--page-turning" : ""}`}>
         <div className="virtual-book" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index] as ReaderRow;
@@ -291,7 +342,7 @@ export function BookReader({ loaded, onChooseBook }: BookReaderProps) {
                   block={row.block}
                   loaded={loaded}
                   showJapanese={showJapanese}
-                  showGeneratedRuby={renderGeneratedRuby}
+                  showAssistedRuby={renderAssistedRuby}
                   onInternalLink={followInternalLink}
                 />
               </div>
@@ -318,13 +369,53 @@ export function BookReader({ loaded, onChooseBook }: BookReaderProps) {
             </button>
             <button
               type="button"
-              aria-pressed={showGeneratedRuby}
-              disabled={!generatedAvailable}
-              onClick={toggleGeneratedRuby}
-              title={generatedAvailable ? undefined : "本书没有程序生成注音"}
+              aria-pressed={showAssistedRuby}
+              disabled={!assistedAvailable}
+              onClick={toggleAssistedRuby}
+              title={assistedAvailable ? undefined : "本书没有程序补充注音"}
             >
-              <span>注音</span><kbd>E</kbd><b>{showGeneratedRuby ? "开" : "关"}</b>
+              <span>注音</span><kbd>E</kbd><b>{showAssistedRuby ? "开" : "关"}</b>
             </button>
+            <label className="reader-menu-setting">
+              <span>回退</span><kbd>R / W</kbd>
+              <input
+                aria-label="回退段数"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                value={backwardInput}
+                onChange={(event) => setBackwardInput(event.target.value)}
+                onBlur={() => commitNavigationInput("backward")}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Escape") {
+                    setBackwardInput(String(navigation.backwardTextSteps));
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </label>
+            <label className="reader-menu-setting">
+              <span>快进</span><kbd>F / S</kbd>
+              <input
+                aria-label="快进段数"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                value={forwardInput}
+                onChange={(event) => setForwardInput(event.target.value)}
+                onBlur={() => commitNavigationInput("forward")}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Escape") {
+                    setForwardInput(String(navigation.forwardTextSteps));
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </label>
           </div>
         </div>
       )}
@@ -336,15 +427,20 @@ interface BlockProps {
   block: BlockNode;
   loaded: LoadedBook;
   showJapanese: boolean;
-  showGeneratedRuby: boolean;
+  showAssistedRuby: boolean;
   onInternalLink(target: Extract<LinkTarget, { kind: "internal" }>): void;
 }
 
-const Block = memo(function Block({ block, loaded, showJapanese, showGeneratedRuby, onInternalLink }: BlockProps) {
+const Block = memo(function Block({ block, loaded, showJapanese, showAssistedRuby, onInternalLink }: BlockProps) {
   if (block.type === "image") {
     const source = loaded.assetUrlById.get(block.assetId);
     return (
-      <figure className={`image-block image-block--${block.role}`} id={block.id}>
+      <figure
+        className={`image-block image-block--${block.role}`}
+        id={block.id}
+        data-reading-anchor
+        data-block-id={block.id}
+      >
         {source
           ? <img src={source} alt={block.alt} loading="lazy" />
           : <div className="missing-block">{block.alt || "插图资源缺失"}</div>}
@@ -374,7 +470,7 @@ const Block = memo(function Block({ block, loaded, showJapanese, showGeneratedRu
         <span className={`content-variant ${primary.language === "ja-JP" ? "content-variant--ja" : "content-variant--zh"}`} lang={primary.language}>
           <InlineContent
             nodes={primary.content}
-            showGeneratedRuby={showGeneratedRuby}
+            showAssistedRuby={showAssistedRuby}
             assetUrlById={loaded.assetUrlById}
             onInternalLink={onInternalLink}
           />
@@ -384,7 +480,7 @@ const Block = memo(function Block({ block, loaded, showJapanese, showGeneratedRu
         <span className="content-variant content-variant--ja" lang="ja-JP" data-japanese-variant>
           <InlineContent
             nodes={japanese.content}
-            showGeneratedRuby={showGeneratedRuby}
+            showAssistedRuby={showAssistedRuby}
             assetUrlById={loaded.assetUrlById}
             onInternalLink={onInternalLink}
           />

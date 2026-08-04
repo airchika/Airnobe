@@ -1,16 +1,19 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dirname, extname, resolve, sep } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BookManifestSchema, type BookManifest } from "@airnobe/book-format";
 import { convertEpubBytes, writeConversionAtomically } from "@airnobe/epub-normalizer";
 import { deriveFuriganaDirectory } from "@airnobe/furigana";
 import { createServer, type Plugin } from "vite";
+import { readReaderSettings, writeReaderSettings } from "./settings-store.js";
+import { parseReaderSettings } from "./src/reader-settings.js";
 
 const APP_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_DIRECTORY = resolve(APP_DIRECTORY, "../..");
 const LIBRARY_DIRECTORY = resolve(REPOSITORY_DIRECTORY, "AirnobeLibrary");
+const SETTINGS_PATH = join(LIBRARY_DIRECTORY, "user.json");
 const MAX_EPUB_BYTES = 512 * 1024 * 1024;
 const BOOK_ID_PATTERN = /^[a-f0-9]{16}$/;
 
@@ -41,6 +44,15 @@ async function readRequestBytes(request: IncomingMessage): Promise<Uint8Array> {
   }
   if (size === 0) throw new HttpError(400, "没有收到 EPUB 文件。");
   return Buffer.concat(chunks);
+}
+
+async function readRequestJson(request: IncomingMessage): Promise<unknown> {
+  const bytes = await readRequestBytes(request);
+  try {
+    return JSON.parse(Buffer.from(bytes).toString("utf8"));
+  } catch {
+    throw new HttpError(400, "阅读设置不是有效 JSON。");
+  }
 }
 
 function decodeFileName(request: IncomingMessage): string {
@@ -139,6 +151,17 @@ async function sendAsset(bookId: string, assetId: string, response: ServerRespon
   response.end(bytes);
 }
 
+async function sendReaderSettings(response: ServerResponse): Promise<void> {
+  sendJson(response, 200, await readReaderSettings(SETTINGS_PATH));
+}
+
+async function updateReaderSettings(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const settings = parseReaderSettings(await readRequestJson(request));
+  if (!settings) throw new HttpError(400, "阅读设置必须包含 1–99 的整数回退段数和快进段数。");
+  await writeReaderSettings(SETTINGS_PATH, settings);
+  sendJson(response, 200, settings);
+}
+
 function localBookApi(): Plugin {
   return {
     name: "airnobe-local-book-api",
@@ -148,6 +171,14 @@ function localBookApi(): Plugin {
         try {
           if (request.method === "POST" && url.pathname === "/api/import-epub") {
             await importEpub(request, response);
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/settings") {
+            await sendReaderSettings(response);
+            return;
+          }
+          if (request.method === "PUT" && url.pathname === "/api/settings") {
+            await updateReaderSettings(request, response);
             return;
           }
           const bookMatch = /^\/api\/books\/([a-f0-9]{16})$/.exec(url.pathname);

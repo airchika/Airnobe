@@ -41,7 +41,7 @@ describe("furigana AST annotation", () => {
     const documents = [documentWith([[{ type: "text", value: "私 は食べる。" }]])];
     const stats = annotateDocuments(documents, tokenizer);
     expect(received).toBe("私 は食べる。");
-    expect(stats.generatedRubyCount).toBe(2);
+    expect(stats).toEqual({ reusedRubyCount: 0, generatedRubyCount: 2, skippedLowConfidenceCount: 0 });
     const content = documents[0]?.blocks[0];
     if (content?.type !== "text") throw new Error("missing text block");
     expect(content.variants[0]?.content).toEqual([
@@ -53,17 +53,73 @@ describe("furigana AST annotation", () => {
     ]);
   });
 
-  it("protects source ruby and reuses only a book-unique reading at token boundaries", () => {
+  it("protects source ruby and marks a book-unique reused reading separately", () => {
     const tokenizer: TokenizerLike = { tokenize: () => [{ surface_form: "生", reading: "セイ" }] };
     const sourceRuby: InlineNode = { type: "ruby", segments: [{ base: "生", reading: "なま" }], origin: "source" };
     const documents = [documentWith([[sourceRuby], [{ type: "text", value: "生" }]])];
     const stats = annotateDocuments(documents, tokenizer);
-    expect(stats.generatedRubyCount).toBe(1);
+    expect(stats).toEqual({ reusedRubyCount: 1, generatedRubyCount: 0, skippedLowConfidenceCount: 0 });
     const first = documents[0]?.blocks[0];
     const second = documents[0]?.blocks[1];
     if (first?.type !== "text" || second?.type !== "text") throw new Error("missing text block");
     expect(first.variants[0]?.content).toEqual([sourceRuby]);
-    expect(second.variants[0]?.content).toEqual([{ type: "ruby", segments: [{ base: "生", reading: "なま" }], origin: "generated" }]);
+    expect(second.variants[0]?.content).toEqual([{ type: "ruby", segments: [{ base: "生", reading: "なま" }], origin: "reused" }]);
+  });
+
+  it("reuses a complete multi-segment source base across whole token boundaries", () => {
+    const tokenizer: TokenizerLike = {
+      tokenize: (text) => text === "異世界"
+        ? [{ surface_form: "異", reading: "イ" }, { surface_form: "世界", reading: "セカイ" }]
+        : [{ surface_form: text }],
+    };
+    const sourceRuby: InlineNode = {
+      type: "ruby",
+      segments: [{ base: "異", reading: "い" }, { base: "世界", reading: "せかい" }],
+      origin: "source",
+    };
+    const documents = [documentWith([[sourceRuby], [{ type: "text", value: "異世界" }]])];
+    const stats = annotateDocuments(documents, tokenizer);
+    expect(stats.reusedRubyCount).toBe(1);
+    const second = documents[0]?.blocks[1];
+    if (second?.type !== "text") throw new Error("missing text block");
+    expect(second.variants[0]?.content).toEqual([{
+      type: "ruby",
+      segments: [{ base: "異世界", reading: "いせかい" }],
+      origin: "reused",
+    }]);
+  });
+
+  it("does not reuse a source base embedded inside a larger tokenizer token", () => {
+    const tokenizer: TokenizerLike = {
+      tokenize: (text) => text === "生物"
+        ? [{ surface_form: "生物", reading: "セイブツ" }]
+        : [{ surface_form: text }],
+    };
+    const sourceRuby: InlineNode = { type: "ruby", segments: [{ base: "生", reading: "なま" }], origin: "source" };
+    const documents = [documentWith([[sourceRuby], [{ type: "text", value: "生物" }]])];
+    const stats = annotateDocuments(documents, tokenizer);
+    expect(stats).toEqual({ reusedRubyCount: 0, generatedRubyCount: 1, skippedLowConfidenceCount: 0 });
+    const second = documents[0]?.blocks[1];
+    if (second?.type !== "text") throw new Error("missing text block");
+    expect(second.variants[0]?.content).toEqual([{
+      type: "ruby",
+      segments: [{ base: "生物", reading: "せいぶつ" }],
+      origin: "generated",
+    }]);
+  });
+
+  it("does not reuse a source base with conflicting publisher readings", () => {
+    const tokenizer: TokenizerLike = { tokenize: () => [{ surface_form: "生", reading: "セイ" }] };
+    const documents = [documentWith([
+      [{ type: "ruby", segments: [{ base: "生", reading: "なま" }], origin: "source" }],
+      [{ type: "ruby", segments: [{ base: "生", reading: "せい" }], origin: "source" }],
+      [{ type: "text", value: "生" }],
+    ])];
+    const stats = annotateDocuments(documents, tokenizer);
+    expect(stats).toEqual({ reusedRubyCount: 0, generatedRubyCount: 1, skippedLowConfidenceCount: 0 });
+    const third = documents[0]?.blocks[2];
+    if (third?.type !== "text") throw new Error("missing text block");
+    expect(third.variants[0]?.content[0]).toMatchObject({ type: "ruby", origin: "generated" });
   });
 
   it("keeps unknown words and person names unchanged", () => {
@@ -75,7 +131,7 @@ describe("furigana AST annotation", () => {
     };
     const documents = [documentWith([[{ type: "text", value: "造語山田" }]])];
     const stats = annotateDocuments(documents, tokenizer);
-    expect(stats).toEqual({ generatedRubyCount: 0, skippedLowConfidenceCount: 2 });
+    expect(stats).toEqual({ reusedRubyCount: 0, generatedRubyCount: 0, skippedLowConfidenceCount: 2 });
   });
 
   it("loads the bundled Kuromoji/IPADIC tokenizer", async () => {

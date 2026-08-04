@@ -40,14 +40,14 @@ readingOrder 来自 OPF spine；TOC 优先使用 EPUB3 nav，缺失时回退 NCX
 
 ## 正文模型
 
-正文只保存类型化 JSON AST，不保存 HTML 或重复的 `plainText`。Zod schema 位于 [`packages/book-format/src/index.ts`](./packages/book-format/src/index.ts)。
+正文只保存类型化 JSON AST，不保存 HTML 或重复的 `plainText`。当前格式版本为 2，Zod schema 位于 [`packages/book-format/src/index.ts`](./packages/book-format/src/index.ts)。
 
 - `TextBlock` 保存段落、标题或图注及一个或多个 `ContentVariant`。
 - variant 保存语言、原文/译文来源、顺序、行内 AST 和源位置。
 - 多个中文译文保存为多个有序 `zh-CN` variant，不伪造译者身份。
 - 行内节点支持文本、ruby、强调、换行、链接和 gaiji。
 
-ruby 使用 `origin: "source" | "generated"` 区分出版社注音和 P0.5 注音。出版社注音属于日文原文；程序注音是可选辅助层。
+ruby 使用 `origin: "source" | "reused" | "generated"` 区分出版社注音、书内读音复用和词典生成注音。出版社注音属于日文原文；后两类是同一个可选辅助层。
 
 ## P0 规则
 
@@ -60,7 +60,7 @@ container.xml -> OPF manifest/spine -> EPUB3 nav 或 NCX
 - 同时支持纯中文书和 auto-novel 中日书；没有结构证据时不按语言猜测配对。
 - auto-novel 只认 `opacity:0.4` 的原文段落及同父级紧邻的纯文本译文段落，支持两种中日顺序和多个译文。
 - ruby 支持 `rb+rt`、隐式文本或 span 加 `rt`、多组 base/rt 和 `rp`。
-- 保留强调、换行、安全链接、行内 gaiji、块级图片、分隔图和简单 SVG image 包装。
+- 保留强调、换行、安全链接、行内 gaiji、块级图片、分隔图和简单 SVG image 包装；无正文文本的纯图片段落输出为块级插画。
 - CSS、脚本和 EPUB 内字体不进入输出；复杂 SVG、缺失资源和未知节点使用占位或文本降级并报告。
 - 危险 ZIP 路径、错误 XML 和无效引用不能静默通过。
 
@@ -71,9 +71,9 @@ P0.5 校验基础书后复制文档和资源，只处理 `ja-JP` variant：
 1. 展平整个文本块并建立 AST 偏移映射。
 2. 保护出版社 ruby、换行和图片范围。
 3. 使用 Kuromoji/IPADIC 对完整句子分词。
-4. 仅在分词边界匹配时复用书内唯一读音。
+4. 将多 segment ruby 的完整 base/readings 一并登记，仅在一个或多个完整分词边界匹配时复用书内唯一读音。
 5. 按词生成 ruby，并拆出共同假名前后缀作为送假名。
-6. 只把能安全映射的结果写为 `origin: "generated"`。
+6. 复用结果写为 `origin: "reused"`，词典结果写为 `origin: "generated"`，并分别计数。
 7. 未知词、人名和低置信度范围保持原文并报告。
 
 派生书在 `book.json.derivation` 记录基础书 ID、引擎和词典版本。已有 derivation 的输入会被拒绝。
