@@ -4,6 +4,7 @@ export interface ReaderSettings {
     backwardTextSteps: number;
     forwardTextSteps: number;
   };
+  pageTransitions: boolean;
 }
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
@@ -12,6 +13,7 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
     backwardTextSteps: 2,
     forwardTextSteps: 2,
   },
+  pageTransitions: false,
 };
 
 export function isNavigationStepCount(value: unknown): value is number {
@@ -30,6 +32,7 @@ export function parseReaderSettings(value: unknown): ReaderSettings | undefined 
       backwardTextSteps: navigation.backwardTextSteps,
       forwardTextSteps: navigation.forwardTextSteps,
     },
+    pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
   };
 }
 
@@ -37,6 +40,7 @@ export function cloneReaderSettings(settings: ReaderSettings): ReaderSettings {
   return {
     version: 1,
     navigation: { ...settings.navigation },
+    pageTransitions: settings.pageTransitions,
   };
 }
 

@@ -17,8 +17,24 @@ export interface LoadedBook {
   assetUrlById: Map<string, string>;
   report?: ConversionReport;
   sourceLabel: string;
+  sourceEpubUrl?: string;
   dispose(): void;
 }
+
+export interface LibraryBookSummary {
+  id: string;
+  title: string;
+  authors: string[];
+}
+
+export type EpubImportResult =
+  | { outcome: "imported"; loaded: LoadedBook; warning?: string }
+  | { outcome: "exact-duplicate"; book: LibraryBookSummary }
+  | { outcome: "possible-duplicate"; candidates: LibraryBookSummary[] };
+
+export type DuplicateResolution =
+  | { action: "add" }
+  | { action: "replace"; bookId: string };
 
 interface BookBundle {
   book: unknown;
@@ -140,9 +156,9 @@ async function responseJson(response: Response): Promise<unknown> {
 }
 
 export async function loadBookFromApi(bookId: string): Promise<LoadedBook> {
-  if (!/^[a-f0-9]{16}$/.test(bookId)) throw new Error("本地书籍编号无效。");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
   const value = await responseJson(await fetch(`/api/books/${bookId}`)) as BookBundle;
-  return createLoadedBook(
+  const loaded = createLoadedBook(
     value.book,
     value.documents,
     value.report,
@@ -150,19 +166,51 @@ export async function loadBookFromApi(bookId: string): Promise<LoadedBook> {
     (assetId) => `/api/books/${bookId}/assets/${encodeURIComponent(assetId)}`,
     () => {},
   );
+  loaded.sourceEpubUrl = `/api/books/${bookId}/source`;
+  return loaded;
 }
 
-export async function importEpubFile(file: File): Promise<LoadedBook> {
+function parseBookSummary(value: unknown): LibraryBookSummary {
+  if (typeof value !== "object" || value === null) throw new Error("本地服务返回了无效的书籍信息。");
+  const summary = value as Partial<LibraryBookSummary>;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(summary.id)) || typeof summary.title !== "string" || !Array.isArray(summary.authors)) {
+    throw new Error("本地服务返回了无效的书籍信息。");
+  }
+  return { id: String(summary.id), title: summary.title, authors: summary.authors.map(String) };
+}
+
+export async function importEpubFile(file: File, resolution?: DuplicateResolution): Promise<EpubImportResult> {
   if (!file.name.toLowerCase().endsWith(".epub")) throw new Error("请选择 EPUB 文件。");
+  const headers: Record<string, string> = { "x-airnobe-filename": encodeURIComponent(file.name) };
+  if (resolution) {
+    headers["x-airnobe-duplicate-action"] = resolution.action;
+    if (resolution.action === "replace") headers["x-airnobe-replace-book-id"] = resolution.bookId;
+  }
   const value = await responseJson(await fetch("/api/import-epub", {
     method: "POST",
-    headers: { "x-airnobe-filename": encodeURIComponent(file.name) },
+    headers,
     body: file,
   }));
-  if (typeof value !== "object" || value === null || !("bookId" in value)) {
+  if (typeof value !== "object" || value === null || !("outcome" in value)) {
+    throw new Error("本地服务没有返回导入结果。");
+  }
+  const response = value as Record<string, unknown>;
+  if (response.outcome === "exact-duplicate") {
+    return { outcome: "exact-duplicate", book: parseBookSummary(response.book) };
+  }
+  if (response.outcome === "possible-duplicate") {
+    if (!Array.isArray(response.candidates) || response.candidates.length === 0) throw new Error("疑似重复书籍列表无效。");
+    return { outcome: "possible-duplicate", candidates: response.candidates.map(parseBookSummary) };
+  }
+  if (response.outcome !== "imported" || typeof response.bookId !== "string") {
     throw new Error("本地服务没有返回书籍编号。");
   }
-  return loadBookFromApi(String((value as { bookId: unknown }).bookId));
+  const loaded = await loadBookFromApi(response.bookId);
+  return {
+    outcome: "imported",
+    loaded,
+    ...(typeof response.warning === "string" ? { warning: response.warning } : {}),
+  };
 }
 
 export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBook> {

@@ -6,6 +6,7 @@ describe("reader settings", () => {
     expect(DEFAULT_READER_SETTINGS).toEqual({
       version: 1,
       navigation: { backwardTextSteps: 2, forwardTextSteps: 2 },
+      pageTransitions: false,
     });
   });
 
@@ -13,7 +14,12 @@ describe("reader settings", () => {
     expect(parseReaderSettings({
       version: 1,
       navigation: { backwardTextSteps: 3, forwardTextSteps: 9 },
-    })).toEqual({ version: 1, navigation: { backwardTextSteps: 3, forwardTextSteps: 9 } });
+    })).toEqual({ version: 1, navigation: { backwardTextSteps: 3, forwardTextSteps: 9 }, pageTransitions: false });
+    expect(parseReaderSettings({
+      version: 1,
+      navigation: { backwardTextSteps: 3, forwardTextSteps: 9 },
+      pageTransitions: true,
+    })).toEqual({ version: 1, navigation: { backwardTextSteps: 3, forwardTextSteps: 9 }, pageTransitions: true });
     expect(parseReaderSettings({ version: 1, navigation: { backwardTextSteps: 0, forwardTextSteps: 2 } })).toBeUndefined();
     expect(parseReaderSettings({ version: 1, navigation: { backwardTextSteps: 2.5, forwardTextSteps: 2 } })).toBeUndefined();
     expect(parseReaderSettings({ version: 2, navigation: { backwardTextSteps: 2, forwardTextSteps: 2 } })).toBeUndefined();

@@ -18,11 +18,13 @@ describe("reader settings store", () => {
     await expect(readReaderSettings(settingsPath)).resolves.toEqual({
       version: 1,
       navigation: { backwardTextSteps: 2, forwardTextSteps: 2 },
+      pageTransitions: false,
     });
     await writeFile(settingsPath, "not-json", "utf8");
     await expect(readReaderSettings(settingsPath)).resolves.toEqual({
       version: 1,
       navigation: { backwardTextSteps: 2, forwardTextSteps: 2 },
+      pageTransitions: false,
     });
   });
 
@@ -33,10 +35,12 @@ describe("reader settings store", () => {
     await writeReaderSettings(settingsPath, {
       version: 1,
       navigation: { backwardTextSteps: 4, forwardTextSteps: 7 },
+      pageTransitions: true,
     });
     expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
       version: 1,
       navigation: { backwardTextSteps: 4, forwardTextSteps: 7 },
+      pageTransitions: true,
     });
   });
 });

@@ -175,7 +175,23 @@ kbd {
 }
 
 .reading-column--page-turning {
-  opacity: 0;
+  opacity: 0.6;
+}
+
+::view-transition-old(root) {
+  animation: airnobe-page-turn-old 150ms ease-out both;
+}
+
+::view-transition-new(root) {
+  animation: airnobe-page-turn-new 150ms ease-in both;
+}
+
+@keyframes airnobe-page-turn-old {
+  to { opacity: 0; }
+}
+
+@keyframes airnobe-page-turn-new {
+  from { opacity: 0; }
 }
 
 .virtual-book {
@@ -239,7 +255,7 @@ kbd {
   font-family: "Sarasa Gothic J", "Yu Gothic", sans-serif;
   font-size: clamp(15px, 2vw, 17px);
   line-height: 2.15;
-  opacity: 0.4;
+  opacity: 0.6;
 }
 
 .content-variant--ja::before {
@@ -377,7 +393,8 @@ rt {
   backdrop-filter: blur(18px);
 }
 
-.reader-menu button {
+.reader-menu button,
+.reader-menu-action {
   min-height: 42px;
   display: grid;
   grid-template-columns: 1fr auto 22px;
@@ -390,16 +407,56 @@ rt {
   background: transparent;
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
 }
 
-.reader-menu button:first-child {
+.reader-menu button:first-child,
+.reader-menu-action {
   grid-template-columns: 1fr;
 }
 
 .reader-menu button:hover,
-.reader-menu button:focus-visible {
+.reader-menu button:focus-visible,
+.reader-menu-action:hover,
+.reader-menu-action:focus-visible {
   border-color: rgba(215, 168, 92, 0.3);
   background: var(--accent-soft);
+}
+
+.duplicate-dialog {
+  width: min(420px, calc(100vw - 40px));
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #d9dddd;
+  background: var(--surface-raised);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
+}
+
+.duplicate-dialog > span {
+  color: var(--muted);
+}
+
+.duplicate-dialog select {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: #dce1e2;
+  background: #202426;
+}
+
+.duplicate-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.duplicate-dialog-actions button {
+  min-height: 36px;
+  padding: 0 13px;
 }
 
 .reader-menu button:disabled {
@@ -486,6 +543,30 @@ rt {
   color: #d9dddd;
   background: #2a2020;
   box-shadow: 0 16px 50px rgba(0, 0, 0, 0.35);
+}
+
+.notice-toast {
+  position: fixed;
+  z-index: 110;
+  right: 20px;
+  bottom: 20px;
+  max-width: min(460px, calc(100vw - 40px));
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid rgba(215, 168, 92, 0.3);
+  border-radius: 5px;
+  color: #cbd1d3;
+  background: #25231f;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.35);
+}
+
+.notice-toast button {
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
 }
 
 .error-toast strong {

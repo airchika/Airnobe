@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "dev-server.ts", "settings-store.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "dev-server.ts", "settings-store.ts", "library-store.ts", "library-import.ts", "vite.config.ts"]
 }

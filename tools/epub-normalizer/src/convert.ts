@@ -69,6 +69,7 @@ export async function convertEpubBytes(bytes: Uint8Array, sourceFileName: string
       fileName: basename(sourceFileName),
       sha256: sourceSha256,
       packagePath: packageInfo.packagePath,
+      ...(packageInfo.uniqueIdentifier ? { identifier: packageInfo.uniqueIdentifier } : {}),
       languages: packageInfo.languages,
     },
     metadata: {

@@ -22,6 +22,7 @@ describe("EPUB normalizer", () => {
     expect(result.book.toc[0]?.target?.documentId).toBe(result.documents[0]?.id);
     expect(result.book.toc[0]?.target?.fragmentId).toBe("start");
     expect(result.documents[0]?.anchors.start).toBeTruthy();
+    expect(result.book.source.identifier).toBe("fixture-id");
   });
 
   it("pairs zh-jp only from the auto-novel anchor and preserves semantic AST", async () => {

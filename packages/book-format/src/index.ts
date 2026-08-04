@@ -179,6 +179,7 @@ export const BookManifestSchema = z.object({
     fileName: z.string().min(1).refine((value) => !/[\\/]/.test(value), "Expected a file name without directories"),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     packagePath: RelativePathSchema,
+    identifier: z.string().min(1).optional(),
     languages: z.array(z.string()),
   }).strict(),
   metadata: z.object({

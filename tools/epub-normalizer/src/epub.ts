@@ -67,7 +67,13 @@ export async function parsePackage(zip: JSZip): Promise<PackageInfo> {
   const title = textValues("title")[0] ?? "";
   const authors = textValues("creator");
   const languages = textValues("language");
-  const uniqueIdentifier = textValues("identifier")[0] ?? "";
+  const identifierNodes = descendantElements(metadata, "identifier");
+  const uniqueIdentifierId = attr(packageElement, "unique-identifier");
+  const uniqueIdentifierNode = uniqueIdentifierId
+    ? identifierNodes.find((node) => attr(node, "id") === uniqueIdentifierId)
+    : undefined;
+  const selectedIdentifierNode = uniqueIdentifierNode ?? identifierNodes[0];
+  const uniqueIdentifier = selectedIdentifierNode ? normalizedText(selectedIdentifierNode) : "";
   const manifest = new Map<string, ManifestItem>();
   for (const item of elementChildren(manifestElement).filter((node) => localName(node) === "item")) {
     const id = attr(item, "id");

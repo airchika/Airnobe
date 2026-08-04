@@ -4,18 +4,25 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BookManifestSchema, type BookManifest } from "@airnobe/book-format";
-import { convertEpubBytes, writeConversionAtomically } from "@airnobe/epub-normalizer";
-import { deriveFuriganaDirectory } from "@airnobe/furigana";
+import { inspectEpubBytes } from "@airnobe/epub-normalizer";
 import { createServer, type Plugin } from "vite";
+import { importLibraryBook } from "./library-import.js";
+import {
+  findExactDuplicate,
+  findProbableDuplicates,
+  readLibraryIndex,
+} from "./library-store.js";
 import { readReaderSettings, writeReaderSettings } from "./settings-store.js";
 import { parseReaderSettings } from "./src/reader-settings.js";
 
 const APP_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_DIRECTORY = resolve(APP_DIRECTORY, "../..");
 const LIBRARY_DIRECTORY = resolve(REPOSITORY_DIRECTORY, "AirnobeLibrary");
+const LIBRARY_INDEX_PATH = join(LIBRARY_DIRECTORY, "library.json");
 const SETTINGS_PATH = join(LIBRARY_DIRECTORY, "user.json");
 const MAX_EPUB_BYTES = 512 * 1024 * 1024;
-const BOOK_ID_PATTERN = /^[a-f0-9]{16}$/;
+const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+let importQueue: Promise<void> = Promise.resolve();
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -59,21 +66,16 @@ function decodeFileName(request: IncomingMessage): string {
   const header = request.headers["x-airnobe-filename"];
   if (typeof header !== "string") return "book.epub";
   try {
-    const name = decodeURIComponent(header).replace(/[\\/]/g, "_").trim();
+    const name = decodeURIComponent(header).replace(/[\\/\u0000-\u001f\u007f]/g, "_").trim();
     return name || "book.epub";
   } catch {
     return "book.epub";
   }
 }
 
-function libraryBookDirectory(kind: "base" | "furigana", bookId: string): string {
+function libraryBookDirectory(bookId: string): string {
   if (!BOOK_ID_PATTERN.test(bookId)) throw new HttpError(404, "书籍不存在。");
-  return resolve(LIBRARY_DIRECTORY, kind, bookId);
-}
-
-function legacyBookDirectory(bookId: string): string {
-  if (!BOOK_ID_PATTERN.test(bookId)) throw new HttpError(404, "书籍不存在。");
-  return resolve(LIBRARY_DIRECTORY, bookId);
+  return resolve(LIBRARY_DIRECTORY, "books", bookId);
 }
 
 function resolveBookFile(directory: string, relativePath: string): string {
@@ -95,37 +97,58 @@ async function importEpub(request: IncomingMessage, response: ServerResponse): P
   const fileName = decodeFileName(request);
   if (extname(fileName).toLowerCase() !== ".epub") throw new HttpError(400, "请选择 EPUB 文件。");
   const bytes = await readRequestBytes(request);
-  const bookId = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  const baseDirectory = libraryBookDirectory("base", bookId);
-  const furiganaDirectory = libraryBookDirectory("furigana", bookId);
-  try {
-    const cached = await readBook(furiganaDirectory);
-    if (!cached.derivation || cached.derivation.type !== "furigana") throw new Error("Cached book has no furigana derivation.");
-    sendJson(response, 200, { bookId });
+  const sourceSha256 = createHash("sha256").update(bytes).digest("hex");
+  const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
+  const exact = findExactDuplicate(index, sourceSha256);
+  if (exact) {
+    sendJson(response, 200, {
+      outcome: "exact-duplicate",
+      book: { id: exact.id, title: exact.title, authors: exact.authors },
+    });
     return;
-  } catch {
-    // Missing or invalid cached output is rebuilt below.
   }
-  let furiganaInputDirectory = baseDirectory;
-  try {
-    await readBook(baseDirectory);
-  } catch {
-    const legacyDirectory = legacyBookDirectory(bookId);
-    try {
-      const legacyBook = await readBook(legacyDirectory);
-      if (legacyBook.derivation) throw new Error("Legacy cache is already derived.");
-      furiganaInputDirectory = legacyDirectory;
-    } catch {
-      const result = await convertEpubBytes(bytes, fileName);
-      await writeConversionAtomically(baseDirectory, result, true);
+
+  const inspected = await inspectEpubBytes(bytes);
+  const probable = findProbableDuplicates(index, inspected);
+  const action = request.headers["x-airnobe-duplicate-action"];
+  const replaceBookId = request.headers["x-airnobe-replace-book-id"];
+  if (probable.length > 0 && action !== "add" && action !== "replace") {
+    sendJson(response, 200, {
+      outcome: "possible-duplicate",
+      candidates: probable.map((entry) => ({ id: entry.id, title: entry.title, authors: entry.authors })),
+    });
+    return;
+  }
+  if (action === "replace") {
+    if (typeof replaceBookId !== "string" || !probable.some((entry) => entry.id === replaceBookId)) {
+      throw new HttpError(409, "要替换的书籍与当前 EPUB 不匹配。");
     }
+  } else if (replaceBookId !== undefined) {
+    throw new HttpError(400, "重复书籍处理参数无效。");
   }
-  await deriveFuriganaDirectory(furiganaInputDirectory, furiganaDirectory, true);
-  sendJson(response, 200, { bookId });
+
+  const result = await importLibraryBook({
+    libraryDirectory: LIBRARY_DIRECTORY,
+    bytes,
+    fileName,
+    ...(action === "replace" && typeof replaceBookId === "string" ? { replaceBookId } : {}),
+  });
+  sendJson(response, 200, {
+    outcome: "imported",
+    bookId: result.entry.id,
+    annotationStatus: result.entry.annotationStatus,
+    ...(result.annotationError ? { warning: `程序注音生成失败，已打开基础版本：${result.annotationError}` } : {}),
+  });
+}
+
+function enqueueImport(task: () => Promise<void>): Promise<void> {
+  const pending = importQueue.then(task, task);
+  importQueue = pending.catch(() => {});
+  return pending;
 }
 
 async function sendBookBundle(bookId: string, response: ServerResponse): Promise<void> {
-  const directory = libraryBookDirectory("furigana", bookId);
+  const directory = libraryBookDirectory(bookId);
   const book = await readBook(directory);
   const documents = await Promise.all(book.readingOrder.map(async (entry) =>
     JSON.parse(await readFile(resolveBookFile(directory, entry.path), "utf8")) as unknown));
@@ -139,7 +162,7 @@ async function sendBookBundle(bookId: string, response: ServerResponse): Promise
 }
 
 async function sendAsset(bookId: string, assetId: string, response: ServerResponse): Promise<void> {
-  const directory = libraryBookDirectory("furigana", bookId);
+  const directory = libraryBookDirectory(bookId);
   const book = await readBook(directory);
   const asset = book.assets.find((candidate) => candidate.id === assetId);
   if (!asset) throw new HttpError(404, "资源不存在。");
@@ -147,6 +170,24 @@ async function sendAsset(bookId: string, assetId: string, response: ServerRespon
   response.writeHead(200, {
     "content-type": asset.mediaType,
     "cache-control": "public, max-age=31536000, immutable",
+  });
+  response.end(bytes);
+}
+
+function contentDispositionFileName(fileName: string): string {
+  const fallback = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "book.epub";
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+async function sendSourceEpub(bookId: string, response: ServerResponse): Promise<void> {
+  const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
+  const entry = index.books.find((candidate) => candidate.id === bookId);
+  if (!entry) throw new HttpError(404, "书籍不存在。");
+  const bytes = await readFile(resolve(libraryBookDirectory(bookId), "source.epub"));
+  response.writeHead(200, {
+    "content-type": "application/epub+zip",
+    "content-length": bytes.byteLength,
+    "content-disposition": contentDispositionFileName(entry.sourceFileName),
   });
   response.end(bytes);
 }
@@ -170,7 +211,7 @@ function localBookApi(): Plugin {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         try {
           if (request.method === "POST" && url.pathname === "/api/import-epub") {
-            await importEpub(request, response);
+            await enqueueImport(() => importEpub(request, response));
             return;
           }
           if (request.method === "GET" && url.pathname === "/api/settings") {
@@ -181,14 +222,19 @@ function localBookApi(): Plugin {
             await updateReaderSettings(request, response);
             return;
           }
-          const bookMatch = /^\/api\/books\/([a-f0-9]{16})$/.exec(url.pathname);
+          const bookMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
           if (request.method === "GET" && bookMatch) {
             await sendBookBundle(bookMatch[1] as string, response);
             return;
           }
-          const assetMatch = /^\/api\/books\/([a-f0-9]{16})\/assets\/([^/]+)$/.exec(url.pathname);
+          const assetMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/assets\/([^/]+)$/i.exec(url.pathname);
           if (request.method === "GET" && assetMatch) {
             await sendAsset(assetMatch[1] as string, decodeURIComponent(assetMatch[2] as string), response);
+            return;
+          }
+          const sourceMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/source$/i.exec(url.pathname);
+          if (request.method === "GET" && sourceMatch) {
+            await sendSourceEpub(sourceMatch[1] as string, response);
             return;
           }
           next();

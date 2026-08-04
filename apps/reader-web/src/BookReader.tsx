@@ -151,6 +151,7 @@ export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: B
   const [navigation, setNavigation] = useState(settings.navigation);
   const [backwardInput, setBackwardInput] = useState(String(settings.navigation.backwardTextSteps));
   const [forwardInput, setForwardInput] = useState(String(settings.navigation.forwardTextSteps));
+  const [pageTransitions, setPageTransitions] = useState(settings.pageTransitions);
   const firstMenuButtonRef = useRef<HTMLButtonElement>(null);
   const pageTurnInProgressRef = useRef(false);
   const pageTurnTimerRef = useRef<number | undefined>(undefined);
@@ -193,7 +194,8 @@ export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: B
     setNavigation(settings.navigation);
     setBackwardInput(String(settings.navigation.backwardTextSteps));
     setForwardInput(String(settings.navigation.forwardTextSteps));
-  }, [settings.navigation.backwardTextSteps, settings.navigation.forwardTextSteps]);
+    setPageTransitions(settings.pageTransitions);
+  }, [settings.navigation.backwardTextSteps, settings.navigation.forwardTextSteps, settings.pageTransitions]);
 
   const jumpNavigationUnit = useCallback((
     direction: -1 | 1,
@@ -211,12 +213,22 @@ export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: B
 
   const turnPage = useCallback((direction: -1 | 1) => {
     const distance = direction * window.innerHeight;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    if (!pageTransitions || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       window.scrollBy({ top: distance, behavior: "instant" });
       return;
     }
     if (pageTurnInProgressRef.current) return;
     pageTurnInProgressRef.current = true;
+    if (typeof document.startViewTransition === "function") {
+      const transition = document.startViewTransition(() => {
+        window.scrollBy({ top: distance, behavior: "instant" });
+      });
+      void transition.finished.then(
+        () => { pageTurnInProgressRef.current = false; },
+        () => { pageTurnInProgressRef.current = false; },
+      );
+      return;
+    }
     setPageTurning(true);
     pageTurnTimerRef.current = window.setTimeout(() => {
       window.scrollBy({ top: distance, behavior: "instant" });
@@ -225,7 +237,7 @@ export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: B
         pageTurnInProgressRef.current = false;
       }, PAGE_TURN_FADE_IN_MS);
     }, PAGE_TURN_FADE_OUT_MS);
-  }, []);
+  }, [pageTransitions]);
 
   useEffect(() => () => {
     if (pageTurnTimerRef.current !== undefined) window.clearTimeout(pageTurnTimerRef.current);
@@ -251,13 +263,22 @@ export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: B
         ...navigation,
         ...(kind === "backward" ? { backwardTextSteps: parsed } : { forwardTextSteps: parsed }),
       },
+      pageTransitions,
     };
     setNavigation(next.navigation);
     void onSaveSettings(next).catch(() => {
       setNavigation(settings.navigation);
       restore();
     });
-  }, [backwardInput, forwardInput, navigation, onSaveSettings, settings]);
+  }, [backwardInput, forwardInput, navigation, onSaveSettings, pageTransitions, settings]);
+
+  const togglePageTransitions = useCallback(() => {
+    const nextPageTransitions = !pageTransitions;
+    setPageTransitions(nextPageTransitions);
+    void onSaveSettings({ version: 1, navigation, pageTransitions: nextPageTransitions }).catch(() => {
+      setPageTransitions(settings.pageTransitions);
+    });
+  }, [navigation, onSaveSettings, pageTransitions, settings.pageTransitions]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -364,6 +385,11 @@ export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: B
             <button ref={firstMenuButtonRef} type="button" onClick={openBook}>
               <span>打开 EPUB</span>
             </button>
+            {loaded.sourceEpubUrl && (
+              <a className="reader-menu-action" href={loaded.sourceEpubUrl} download={loaded.book.source.fileName} onClick={() => setMenuOpen(false)}>
+                <span>导出原始 EPUB</span>
+              </a>
+            )}
             <button type="button" aria-pressed={showJapanese} onClick={toggleJapanese}>
               <span>日文</span><kbd>Q</kbd><b>{showJapanese ? "开" : "关"}</b>
             </button>
@@ -375,6 +401,9 @@ export function BookReader({ loaded, onChooseBook, settings, onSaveSettings }: B
               title={assistedAvailable ? undefined : "本书没有程序补充注音"}
             >
               <span>注音</span><kbd>E</kbd><b>{showAssistedRuby ? "开" : "关"}</b>
+            </button>
+            <button type="button" aria-label="翻页淡入淡出" aria-pressed={pageTransitions} onClick={togglePageTransitions}>
+              <span>淡入淡出</span><b>{pageTransitions ? "开" : "关"}</b>
             </button>
             <label className="reader-menu-setting">
               <span>回退</span><kbd>R / W</kbd>

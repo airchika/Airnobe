@@ -88,6 +88,7 @@ describe("BookReader", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.useRealTimers();
+    Reflect.deleteProperty(document, "startViewTransition");
   });
 
   it("keeps Q and E independent while publisher ruby remains visible", async () => {
@@ -242,10 +243,28 @@ describe("BookReader", () => {
     expect(topNext).toBeGreaterThan(topPrevious);
   });
 
-  it("turns A and D by one viewport after a short fade instead of smooth scrolling", () => {
+  it("switches A and D instantly without calling View Transitions when the option is off", () => {
+    const scrollBy = vi.spyOn(window, "scrollBy");
+    const startViewTransition = vi.fn();
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
+    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} {...readerSettingsProps} />);
+    fireEvent.keyDown(window, { key: "d" });
+    expect(scrollBy).toHaveBeenCalledWith({ top: window.innerHeight, behavior: "instant" });
+    expect(startViewTransition).not.toHaveBeenCalled();
+    expect(document.querySelector(".reading-column")).not.toHaveClass("reading-column--page-turning");
+  });
+
+  it("falls back to a dimmed instant page turn when View Transitions are unavailable", () => {
     vi.useFakeTimers();
     const scrollBy = vi.spyOn(window, "scrollBy");
-    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} {...readerSettingsProps} />);
+    render(
+      <BookReader
+        loaded={createDemoBook()}
+        onChooseBook={() => {}}
+        settings={{ ...DEFAULT_READER_SETTINGS, pageTransitions: true }}
+        onSaveSettings={async () => {}}
+      />,
+    );
     fireEvent.keyDown(window, { key: "a" });
     expect(document.querySelector(".reading-column")).toHaveClass("reading-column--page-turning");
     expect(scrollBy).not.toHaveBeenCalled();
@@ -258,6 +277,27 @@ describe("BookReader", () => {
     fireEvent.keyDown(window, { key: "d" });
     act(() => vi.advanceTimersByTime(100));
     expect(scrollBy).toHaveBeenLastCalledWith({ top: window.innerHeight, behavior: "instant" });
+  });
+
+  it("uses a browser View Transition to cross-fade an instant page turn", () => {
+    const scrollBy = vi.spyOn(window, "scrollBy");
+    const startViewTransition = vi.fn((update: () => void) => {
+      update();
+      return { finished: Promise.resolve() };
+    });
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
+    render(
+      <BookReader
+        loaded={createDemoBook()}
+        onChooseBook={() => {}}
+        settings={{ ...DEFAULT_READER_SETTINGS, pageTransitions: true }}
+        onSaveSettings={async () => {}}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "d" });
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(scrollBy).toHaveBeenCalledWith({ top: window.innerHeight, behavior: "instant" });
+    expect(document.querySelector(".reading-column")).not.toHaveClass("reading-column--page-turning");
   });
 
   it("edits global backward and forward navigation counts from the reader menu", async () => {
@@ -279,6 +319,7 @@ describe("BookReader", () => {
     expect(saveSettings).toHaveBeenCalledWith({
       version: 1,
       navigation: { backwardTextSteps: 3, forwardTextSteps: 2 },
+      pageTransitions: false,
     });
 
     const forward = screen.getByRole("spinbutton", { name: "快进段数" });
@@ -287,6 +328,13 @@ describe("BookReader", () => {
     fireEvent.blur(forward);
     expect(forward).toHaveValue(2);
     expect(saveSettings).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "翻页淡入淡出" }));
+    expect(saveSettings).toHaveBeenLastCalledWith({
+      version: 1,
+      navigation: { backwardTextSteps: 3, forwardTextSteps: 2 },
+      pageTransitions: true,
+    });
 
     const scrollTo = vi.spyOn(window, "scrollTo");
     await user.click(forward);

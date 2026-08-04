@@ -11,7 +11,9 @@ npm install
 npm run reader
 ```
 
-打开终端显示的本地地址，选择 EPUB 即可。基础结果与注音派生结果分别保存在仓库根目录的 `AirnobeLibrary/base/<book-id>/` 和 `AirnobeLibrary/furigana/<book-id>/`；该目录已加入 `.gitignore`。
+打开终端显示的本地地址，选择 EPUB 即可。书库索引保存在 `AirnobeLibrary/library.json`，每本书位于 `AirnobeLibrary/books/<library-book-id>/`，其中保存原始 `source.epub`、最终阅读数据，以及日文派生书的 `base.snapshot.json.gz`。旧 `base/`、`furigana/` 缓存不会自动迁移或删除。
+
+再次导入完全相同的 EPUB 时不会重新转换；应用会提示打开已有书。书名与作者或 OPF 标识相同但文件不同的书会提示替换、另存或取消。替换仅在新结果完整验证后生效。右键菜单可导出保存的原始 EPUB。
 
 “打开转换结果”只作为调试和打开 P0.5 派生书的备用入口。
 
@@ -21,11 +23,11 @@ npm run reader
 - `E`：同时显示或隐藏 `origin: "reused"` 与 `origin: "generated"` 的辅助注音。
 - `W` / `S`：以下方可见单位为基准，按全局回退/快进段数移动并对齐底部。
 - `R` / `F`：以上方可见单位为基准，按全局回退/快进段数移动并对齐顶部。
-- `A` / `D`：向上或向下滚动一个完整视口高度。
+- `A` / `D`：向上或向下切换一个完整视口高度；右键菜单可选择是否使用淡入淡出。
 - 右键：打开阅读菜单。
 
 日文和程序注音互相独立，换书后都恢复为关闭。从 EPUB 导入时会自动生成 P0.5 派生书。
 
-文本块和块级图片都可导航；分隔符跳过。段数只计文本块，但图片是硬停靠点。右键菜单中的回退、快进段数默认均为 2，保存在 `AirnobeLibrary/user.json`。
+文本块和块级图片都可导航；分隔符跳过。段数只计文本块，但图片是硬停靠点。右键菜单中的回退、快进段数默认均为 2；翻页淡入淡出默认关闭。设置保存在 `AirnobeLibrary/user.json`。
 
 当前版本按 readingOrder 虚拟连续阅读，仅维护桌面端。TOC、阅读进度和桌面文件访问属于后续 P1b/P2。

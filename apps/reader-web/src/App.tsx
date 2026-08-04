@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { BookReader } from "./BookReader.js";
-import { importEpubFile, loadBookFromFiles, type LoadedBook } from "./book-source.js";
+import {
+  importEpubFile,
+  loadBookFromApi,
+  loadBookFromFiles,
+  type DuplicateResolution,
+  type EpubImportResult,
+  type LibraryBookSummary,
+  type LoadedBook,
+} from "./book-source.js";
 import { createDemoBook } from "./demo-book.js";
 import {
   cloneReaderSettings,
@@ -15,6 +23,13 @@ export function App() {
   const [loaded, setLoaded] = useState<LoadedBook | undefined>(() => initialDemo ? createDemoBook() : undefined);
   const [loading, setLoading] = useState<string>();
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [duplicatePrompt, setDuplicatePrompt] = useState<{
+    file: File;
+    kind: "exact" | "possible";
+    candidates: LibraryBookSummary[];
+  }>();
+  const [selectedDuplicateId, setSelectedDuplicateId] = useState<string>();
   const [settings, setSettings] = useState<ReaderSettings>(() => cloneReaderSettings(DEFAULT_READER_SETTINGS));
   const epubInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
@@ -58,19 +73,35 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "instant" });
   };
 
-  const onEpubSelected = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) return;
-    setLoading("正在转换 EPUB…");
+  const handleImportResult = (file: File, result: EpubImportResult): void => {
+    if (result.outcome === "imported") {
+      installBook(result.loaded);
+      if (result.warning) setNotice(result.warning);
+      return;
+    }
+    const candidates = result.outcome === "exact-duplicate" ? [result.book] : result.candidates;
+    setDuplicatePrompt({ file, kind: result.outcome === "exact-duplicate" ? "exact" : "possible", candidates });
+    setSelectedDuplicateId(candidates[0]?.id);
+  };
+
+  const submitEpub = async (file: File, resolution?: DuplicateResolution): Promise<void> => {
+    setLoading(resolution?.action === "replace" ? "正在替换…" : "正在转换 EPUB…");
     setError(undefined);
+    setNotice(undefined);
     try {
-      installBook(await importEpubFile(file));
+      handleImportResult(file, await importEpubFile(file, resolution));
     } catch (loadError) {
       setError((loadError as Error).message);
     } finally {
       setLoading(undefined);
     }
+  };
+
+  const onEpubSelected = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    await submitEpub(file);
   };
 
   const onDirectorySelected = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -135,6 +166,61 @@ export function App() {
           </main>
         )}
       {loading && <div className="loading-overlay" role="status"><span className="loading-dot" />{loading}</div>}
+      {duplicatePrompt && (
+        <div className="reader-menu-backdrop">
+          <div className="duplicate-dialog" role="dialog" aria-modal="true" aria-label="重复书籍">
+            <strong>{duplicatePrompt.kind === "exact" ? "这本书已在书库中" : "可能是同一本书的新版本"}</strong>
+            {duplicatePrompt.kind === "possible" && duplicatePrompt.candidates.length > 1
+              ? (
+                <select
+                  aria-label="要替换的书籍"
+                  value={selectedDuplicateId}
+                  onChange={(event) => setSelectedDuplicateId(event.target.value)}
+                >
+                  {duplicatePrompt.candidates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>{candidate.title}</option>
+                  ))}
+                </select>
+              )
+              : <span>{duplicatePrompt.candidates[0]?.title || "未命名书籍"}</span>}
+            <div className="duplicate-dialog-actions">
+              {duplicatePrompt.kind === "exact"
+                ? <button autoFocus type="button" className="primary-action" onClick={() => {
+                    const id = duplicatePrompt.candidates[0]?.id;
+                    setDuplicatePrompt(undefined);
+                    if (!id) return;
+                    setLoading("正在打开…");
+                    void loadBookFromApi(id)
+                      .then(installBook)
+                      .catch((loadError) => setError((loadError as Error).message))
+                      .finally(() => setLoading(undefined));
+                  }}>打开已有书</button>
+                : (
+                  <>
+                    <button autoFocus type="button" className="primary-action" onClick={() => {
+                      const prompt = duplicatePrompt;
+                      const bookId = selectedDuplicateId;
+                      setDuplicatePrompt(undefined);
+                      if (bookId) void submitEpub(prompt.file, { action: "replace", bookId });
+                    }}>替换</button>
+                    <button type="button" className="secondary-action" onClick={() => {
+                      const file = duplicatePrompt.file;
+                      setDuplicatePrompt(undefined);
+                      void submitEpub(file, { action: "add" });
+                    }}>另存为新书</button>
+                  </>
+                )}
+              <button type="button" className="secondary-action" onClick={() => setDuplicatePrompt(undefined)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {notice && (
+        <div className="notice-toast" role="status">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(undefined)} aria-label="关闭提示">×</button>
+        </div>
+      )}
       {error && (
         <div className="error-toast" role="alert">
           <strong>无法打开</strong>

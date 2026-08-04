@@ -38,6 +38,8 @@ converted-book/
 
 readingOrder 来自 OPF spine；TOC 优先使用 EPUB3 nav，缺失时回退 NCX。nav 文档不进入 readingOrder，TOC 目标使用 `documentId + fragmentId`。
 
+独立 CLI 仍按上述目录输出。阅读器书库则把原始 EPUB、最终阅读版本和共享 assets 放在同一个 `books/<library-book-id>/` 目录；派生成功时把 P0 的 manifest、documents 和 report 保存为 `base.snapshot.json.gz`，不复制 assets。纯中文书与派生失败后直接使用 P0 的书不需要快照。
+
 ## 正文模型
 
 正文只保存类型化 JSON AST，不保存 HTML 或重复的 `plainText`。当前格式版本为 2，Zod schema 位于 [`packages/book-format/src/index.ts`](./packages/book-format/src/index.ts)。
@@ -66,7 +68,7 @@ container.xml -> OPF manifest/spine -> EPUB3 nav 或 NCX
 
 ## P0.5 规则
 
-P0.5 校验基础书后复制文档和资源，只处理 `ja-JP` variant：
+P0.5 校验基础书后生成新的逻辑结果，只处理 `ja-JP` variant：
 
 1. 展平整个文本块并建立 AST 偏移映射。
 2. 保护出版社 ruby、换行和图片范围。
