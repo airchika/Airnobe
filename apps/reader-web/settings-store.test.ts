@@ -33,7 +33,7 @@ describe("reader settings store", () => {
     await expect(readReaderSettings(settingsPath)).resolves.toEqual({ ...DEFAULT_READER_SETTINGS, pageTransitions: true });
   });
 
-  it("writes a complete valid v4 user.json", async () => {
+  it("writes a complete valid v5 user.json", async () => {
     const directory = await mkdtemp(join(tmpdir(), "airnobe-settings-"));
     directories.push(directory);
     const settingsPath = join(directory, "nested", "user.json");

@@ -27,6 +27,9 @@ import {
 } from "./reader-settings.js";
 import { readingProgressSummary, type ReadingPosition } from "./reading-state.js";
 import { useSpatialNavigation } from "./spatial-navigation.js";
+import { SettingsPanel } from "./SettingsPanel.js";
+import { builtinThemeOptions, importTheme as importCustomTheme, loadThemes, type AvailableTheme } from "./theme-client.js";
+import { applyTheme, BUILTIN_THEMES, DEFAULT_THEME_ID, type ThemeDefinition } from "./themes.js";
 
 export function App() {
   const initialDemo = new URLSearchParams(window.location.search).get("demo") === "1";
@@ -44,6 +47,8 @@ export function App() {
   }>();
   const [selectedDuplicateId, setSelectedDuplicateId] = useState<string>();
   const [settings, setSettings] = useState<ReaderSettings>(() => cloneReaderSettings(DEFAULT_READER_SETTINGS));
+  const [themes, setThemes] = useState<AvailableTheme[]>(builtinThemeOptions);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [duplicateSelectEditing, setDuplicateSelectEditing] = useState(false);
   const epubInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
@@ -71,6 +76,18 @@ export function App() {
       });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void loadThemes().then((next) => { if (active) setThemes(next); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const selected = themes.find((item) => item.theme.id === settings.appearance.themeId)?.theme
+      ?? BUILTIN_THEMES.find((theme) => theme.id === DEFAULT_THEME_ID)!;
+    applyTheme(selected);
+  }, [settings.appearance.themeId, themes]);
 
   const refreshLibrary = useCallback(async (preferredBookId?: string): Promise<void> => {
     const books = await loadLibrary();
@@ -214,7 +231,7 @@ export function App() {
   };
 
   const overlayMessage = loading ?? (libraryLoading && !loaded ? "正在加载书库…" : undefined);
-  const interactiveOverlay = duplicatePrompt ? "duplicate" : error ? "error" : notice ? "notice" : undefined;
+  const interactiveOverlay = settingsOpen ? "settings" : duplicatePrompt ? "duplicate" : error ? "error" : notice ? "notice" : undefined;
 
   const activateOverlayItem = useCallback((element: HTMLElement): boolean => {
     if (element.dataset.spatialAction !== "edit-duplicate-select") return false;
@@ -225,7 +242,7 @@ export function App() {
 
   useSpatialNavigation({
     rootRef: overlayRootRef,
-    enabled: Boolean(interactiveOverlay),
+    enabled: Boolean(interactiveOverlay && interactiveOverlay !== "settings"),
     editing: duplicateSelectEditing,
     onActivate: activateOverlayItem,
   });
@@ -275,6 +292,7 @@ export function App() {
             settings={settings}
             onSaveSettings={saveSettings}
             onSaveReadingPosition={saveBookReadingPosition}
+            onOpenSettings={() => setSettingsOpen(true)}
             keyboardNavigationEnabled={keyboardNavigationEnabled}
           />
         : <LibraryView
@@ -282,10 +300,20 @@ export function App() {
             {...(selectedBookId ? { selectedBookId } : {})}
             onSelect={(bookId) => setSelectedBookId(bookId || undefined)}
             onImport={openEpubPicker}
+            onOpenSettings={() => setSettingsOpen(true)}
             onRead={(bookId) => void readLibraryBook(bookId)}
             onUpdate={updateBook}
             keyboardNavigationEnabled={keyboardNavigationEnabled}
           />}
+      {settingsOpen && <SettingsPanel
+        settings={settings}
+        themes={themes}
+        onPreview={(next) => setSettings(next)}
+        onSave={saveSettings}
+        onImport={(theme: ThemeDefinition) => importCustomTheme(theme)}
+        onThemesChange={setThemes}
+        onClose={() => setSettingsOpen(false)}
+      />}
       {overlayMessage && <div className="loading-overlay" role="status"><span className="loading-dot" />{overlayMessage}</div>}
       <div className="app-spatial-overlays" ref={overlayRootRef}>
       {duplicatePrompt && (

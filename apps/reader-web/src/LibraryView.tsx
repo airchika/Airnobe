@@ -12,6 +12,7 @@ interface LibraryViewProps {
   selectedBookId?: string;
   onSelect(bookId: string): void;
   onImport(): void;
+  onOpenSettings?(): void;
   onRead(bookId: string): void;
   onUpdate(bookId: string, patch: { collectionStatus?: CollectionStatus; note?: string }): Promise<void>;
   keyboardNavigationEnabled?: boolean;
@@ -51,7 +52,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(bytes >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
 }
 
-export function LibraryView({ books, selectedBookId, onSelect, onImport, onRead, onUpdate, keyboardNavigationEnabled = true }: LibraryViewProps) {
+export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenSettings, onRead, onUpdate, keyboardNavigationEnabled = true }: LibraryViewProps) {
   const rootRef = useRef<HTMLElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const noteEntryRef = useRef<HTMLLabelElement>(null);
@@ -126,7 +127,10 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onRead,
     <main className="library-app" ref={rootRef}>
       <header className="library-header">
         <h1>Airnobe</h1>
-        <button className="primary-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onImport}>导入 EPUB</button>
+        <div className="library-header-actions">
+          <button className="secondary-action compact-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onOpenSettings}>设置</button>
+          <button className="primary-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onImport}>导入 EPUB</button>
+        </div>
       </header>
       <div className="library-grid">
         <nav className="library-filters" aria-label="藏书状态">

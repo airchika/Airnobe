@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { useWindowVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import type {
@@ -28,6 +28,7 @@ interface BookReaderProps {
   loaded: LoadedBook;
   onChooseBook(): void;
   onReturnToLibrary(): void;
+  onOpenSettings?(): void;
   settings: ReaderSettings;
   onSaveSettings(settings: ReaderSettings): Promise<void>;
   onSaveReadingPosition?(position: ReadingPosition): Promise<void>;
@@ -286,10 +287,10 @@ export function findNavigationTarget(
   }
 }
 
-export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings, onSaveReadingPosition, keyboardNavigationEnabled = true }: BookReaderProps) {
-  const [showJapanese, setShowJapanese] = useState(false);
-  const [showAssistedRuby, setShowAssistedRuby] = useState(false);
-  const [showKatakanaRomaji, setShowKatakanaRomaji] = useState(false);
+export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings, onSaveSettings, onSaveReadingPosition, keyboardNavigationEnabled = true }: BookReaderProps) {
+  const [showJapanese, setShowJapanese] = useState(() => settings.appearance.defaults.showJapanese);
+  const [showAssistedRuby, setShowAssistedRuby] = useState(() => settings.appearance.defaults.showAssistedRuby);
+  const [showKatakanaRomaji, setShowKatakanaRomaji] = useState(() => settings.appearance.defaults.showKatakanaRomaji);
   const [menuOpen, setMenuOpen] = useState(false);
   const [tocOpen, setTocOpen] = useState(false);
   const [currentRowIndex, setCurrentRowIndex] = useState<number>();
@@ -317,6 +318,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
   const restoreFrameRef = useRef<number | undefined>(undefined);
   const restoredPositionRef = useRef(false);
   const lastSavedPositionRef = useRef<string | undefined>(undefined);
+  const appearanceAnchorRef = useRef<ReadingAnchor | undefined>(undefined);
   const [pageTurning, setPageTurning] = useState(false);
   const assistedAvailable = useMemo(() => hasAssistedRuby(loaded), [loaded]);
   const katakanaRomajiAvailable = useMemo(() => hasKatakanaRomaji(loaded), [loaded]);
@@ -415,6 +417,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       if (position) setCurrentRowIndex(rowIndexByBlockId.get(position.blockId));
     };
     const onScroll = (): void => {
+      appearanceAnchorRef.current = captureReadingAnchor("top");
       if (progressFrameRef.current !== undefined) cancelAnimationFrame(progressFrameRef.current);
       progressFrameRef.current = requestAnimationFrame(updateCurrentPosition);
       if (!loaded.libraryBookId || !onSaveReadingPosition) return;
@@ -438,6 +441,30 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       if (restoreFrameRef.current !== undefined) cancelAnimationFrame(restoreFrameRef.current);
     };
   }, [captureReadingPosition, loaded.libraryBookId, onSaveReadingPosition, persistReadingPosition, rowIndexByBlockId]);
+
+  useLayoutEffect(() => {
+    const anchor = appearanceAnchorRef.current;
+    if (!anchor) return;
+    measureMountedRows(virtualizer);
+    restoreReadingAnchor(anchor);
+    appearanceAnchorRef.current = captureReadingAnchor("top");
+  }, [settings.appearance.typography.columnWidth, settings.appearance.typography.fontSize, settings.appearance.typography.fontWeight, settings.appearance.typography.lineHeight, settings.appearance.typography.japaneseOpacity, virtualizer]);
+
+  useEffect(() => {
+    if (!document.fonts) return;
+    let active = true;
+    const anchor = appearanceAnchorRef.current ?? captureReadingAnchor("top");
+    void Promise.all([
+      document.fonts.load(`${settings.appearance.typography.fontWeight} ${settings.appearance.typography.fontSize}px "Sarasa Gothic SC"`),
+      document.fonts.load(`${settings.appearance.typography.fontWeight} ${settings.appearance.typography.fontSize}px "Sarasa Gothic J"`),
+    ]).then(() => {
+      if (!active) return;
+      measureMountedRows(virtualizer);
+      restoreReadingAnchor(anchor);
+      appearanceAnchorRef.current = captureReadingAnchor("top");
+    });
+    return () => { active = false; };
+  }, [settings.appearance.typography.fontSize, settings.appearance.typography.fontWeight, virtualizer]);
 
   const toggleWithAnchor = useCallback((update: () => void) => {
     const anchor = captureReadingAnchor();
@@ -520,10 +547,11 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     if (!isNavigationStepCount(parsed)) return;
     if (parsed === navigation.textSteps) return;
     const next: ReaderSettings = {
-      version: 4,
+      version: 5,
       navigation: { textSteps: parsed },
       shortcuts,
       pageTransitions,
+      appearance: settings.appearance,
     };
     setNavigation(next.navigation);
     const revision = navigationSaveRevisionRef.current + 1;
@@ -533,7 +561,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       setNavigation(settings.navigation);
       setNavigationInput(String(settings.navigation.textSteps));
     });
-  }, [navigation.textSteps, onSaveSettings, pageTransitions, settings.navigation, shortcuts]);
+  }, [navigation.textSteps, onSaveSettings, pageTransitions, settings.appearance, settings.navigation, shortcuts]);
 
   const restoreInvalidNavigationInput = useCallback(() => {
     if (!isNavigationStepCount(Number(navigationInput))) setNavigationInput(String(navigation.textSteps));
@@ -542,10 +570,10 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
   const togglePageTransitions = useCallback(() => {
     const nextPageTransitions = !pageTransitions;
     setPageTransitions(nextPageTransitions);
-    void onSaveSettings({ version: 4, navigation, shortcuts, pageTransitions: nextPageTransitions }).catch(() => {
+    void onSaveSettings({ version: 5, navigation, shortcuts, pageTransitions: nextPageTransitions, appearance: settings.appearance }).catch(() => {
       setPageTransitions(settings.pageTransitions);
     });
-  }, [navigation, onSaveSettings, pageTransitions, settings.pageTransitions, shortcuts]);
+  }, [navigation, onSaveSettings, pageTransitions, settings.appearance, settings.pageTransitions, shortcuts]);
 
   const beginShortcutCapture = useCallback((action: ShortcutAction) => {
     setCapturingAction(action);
@@ -653,10 +681,11 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
         const previousShortcuts = shortcuts;
         const nextShortcuts = { ...shortcuts, [capturingAction]: candidate };
         const next: ReaderSettings = {
-          version: 4,
+          version: 5,
           navigation,
           shortcuts: nextShortcuts,
           pageTransitions,
+          appearance: settings.appearance,
         };
         setShortcuts(nextShortcuts);
         setCapturingAction(undefined);
@@ -709,7 +738,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [capturingAction, closeMenu, jumpNavigationUnit, keyboardNavigationEnabled, menuOpen, navigation, onSaveSettings, pageTransitions, restoreOverlayFocus, shortcuts, tocOpen, toggleAssistedRuby, toggleJapanese, toggleKatakanaRomaji, toggleMenu, toggleToc, turnPage]);
+  }, [capturingAction, closeMenu, jumpNavigationUnit, keyboardNavigationEnabled, menuOpen, navigation, onSaveSettings, pageTransitions, restoreOverlayFocus, settings.appearance, shortcuts, tocOpen, toggleAssistedRuby, toggleJapanese, toggleKatakanaRomaji, toggleMenu, toggleToc, turnPage]);
 
   useEffect(() => {
     if (menuOpen) firstMenuButtonRef.current?.focus({ preventScroll: true });
@@ -743,6 +772,12 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     onReturnToLibrary();
   }, [closeMenu, onReturnToLibrary, persistReadingPosition]);
 
+  const openReaderSettings = useCallback(() => {
+    appearanceAnchorRef.current = captureReadingAnchor("top");
+    closeMenu(false);
+    onOpenSettings?.();
+  }, [closeMenu, onOpenSettings]);
+
   const followTocEntry = useCallback((entry: TocEntry) => {
     if (entry.targetIndex === undefined) return;
     setTocOpen(false);
@@ -756,6 +791,13 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       className="reader-app"
       ref={readerRootRef}
       tabIndex={-1}
+      style={{
+        "--reading-width": `${settings.appearance.typography.columnWidth}px`,
+        "--reader-font-size": `${settings.appearance.typography.fontSize}px`,
+        "--reader-font-weight": settings.appearance.typography.fontWeight,
+        "--reader-line-height": settings.appearance.typography.lineHeight,
+        "--japanese-opacity": settings.appearance.typography.japaneseOpacity,
+      } as CSSProperties}
       onContextMenu={(event) => {
         event.preventDefault();
         rememberOverlayFocus();
@@ -893,6 +935,9 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
                 }}
               />
             </label>
+            <button type="button" data-spatial-item data-spatial-zone="menu" data-spatial-zone-order="0" data-spatial-row="14" onClick={openReaderSettings}>
+              <span>阅读设置</span>
+            </button>
             {bindingError && <p className="reader-menu-error" role="alert">{bindingError}</p>}
           </div>
         </div>

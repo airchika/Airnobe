@@ -1,3 +1,5 @@
+import { DEFAULT_THEME_ID, isThemeId } from "./themes.js";
+
 const V2_SHORTCUT_ACTIONS = [
   "toggleJapanese",
   "toggleAssistedRuby",
@@ -30,13 +32,36 @@ export interface ShortcutBinding {
 }
 
 export interface ReaderSettings {
-  version: 4;
+  version: 5;
   navigation: {
     textSteps: number;
   };
   shortcuts: Record<ShortcutAction, ShortcutBinding>;
   pageTransitions: boolean;
+  appearance: ReaderAppearance;
 }
+
+export interface ReaderAppearance {
+  themeId: string;
+  typography: {
+    fontSize: number;
+    fontWeight: 400 | 600;
+    lineHeight: number;
+    columnWidth: number;
+    japaneseOpacity: number;
+  };
+  defaults: {
+    showJapanese: boolean;
+    showAssistedRuby: boolean;
+    showKatakanaRomaji: boolean;
+  };
+}
+
+export const DEFAULT_READER_APPEARANCE: ReaderAppearance = {
+  themeId: DEFAULT_THEME_ID,
+  typography: { fontSize: 19, fontWeight: 400, lineHeight: 2.05, columnWidth: 760, japaneseOpacity: 0.6 },
+  defaults: { showJapanese: false, showAssistedRuby: false, showKatakanaRomaji: false },
+};
 
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
   toggleJapanese: { code: "KeyQ" },
@@ -53,12 +78,13 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
 };
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
-  version: 4,
+  version: 5,
   navigation: {
     textSteps: 2,
   },
   shortcuts: cloneShortcuts(DEFAULT_SHORTCUTS),
   pageTransitions: false,
+  appearance: structuredClone(DEFAULT_READER_APPEARANCE),
 };
 
 export function isNavigationStepCount(value: unknown): value is number {
@@ -71,6 +97,43 @@ export function isShortcutCode(value: unknown): value is string {
 
 export function shortcutBindingId(binding: ShortcutBinding): string {
   return `${binding.modifier ?? "None"}+${binding.code}`;
+}
+
+function finiteRange(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+export function parseReaderAppearance(value: unknown): ReaderAppearance | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const typography = typeof record.typography === "object" && record.typography !== null
+    ? record.typography as Record<string, unknown>
+    : undefined;
+  const defaults = typeof record.defaults === "object" && record.defaults !== null
+    ? record.defaults as Record<string, unknown>
+    : undefined;
+  if (!isThemeId(record.themeId) || !typography || !defaults) return undefined;
+  if (!Number.isInteger(typography.fontSize) || !finiteRange(typography.fontSize, 14, 30)) return undefined;
+  if (typography.fontWeight !== 400 && typography.fontWeight !== 600) return undefined;
+  if (!finiteRange(typography.lineHeight, 1.75, 2.6)) return undefined;
+  if (!Number.isInteger(typography.columnWidth) || !finiteRange(typography.columnWidth, 520, 1200)) return undefined;
+  if (!finiteRange(typography.japaneseOpacity, 0.2, 1)) return undefined;
+  if (typeof defaults.showJapanese !== "boolean" || typeof defaults.showAssistedRuby !== "boolean" || typeof defaults.showKatakanaRomaji !== "boolean") return undefined;
+  return {
+    themeId: record.themeId,
+    typography: {
+      fontSize: typography.fontSize,
+      fontWeight: typography.fontWeight,
+      lineHeight: typography.lineHeight,
+      columnWidth: typography.columnWidth,
+      japaneseOpacity: typography.japaneseOpacity,
+    },
+    defaults: {
+      showJapanese: defaults.showJapanese,
+      showAssistedRuby: defaults.showAssistedRuby,
+      showKatakanaRomaji: defaults.showKatakanaRomaji,
+    },
+  };
 }
 
 function parseShortcutBinding(value: unknown): ShortcutBinding | undefined {
@@ -152,10 +215,11 @@ export function parseReaderSettings(value: unknown): ReaderSettings | undefined 
     const legacyShortcuts = parseShortcutsForActions(record.shortcuts, V2_SHORTCUT_ACTIONS);
     if (!legacyShortcuts) return undefined;
     return {
-      version: 4,
+      version: 5,
       navigation: { textSteps: navigation.textSteps },
       shortcuts: migrateV3Shortcuts({ ...legacyShortcuts, toggleToc: migratedTocBinding(legacyShortcuts) }),
       pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
+      appearance: structuredClone(DEFAULT_READER_APPEARANCE),
     };
   }
   if (record.version === 3) {
@@ -163,20 +227,24 @@ export function parseReaderSettings(value: unknown): ReaderSettings | undefined 
     const shortcuts = parseShortcutsForActions(record.shortcuts, V3_SHORTCUT_ACTIONS);
     if (!shortcuts) return undefined;
     return {
-      version: 4,
+      version: 5,
       navigation: { textSteps: navigation.textSteps },
       shortcuts: migrateV3Shortcuts(shortcuts),
       pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
+      appearance: structuredClone(DEFAULT_READER_APPEARANCE),
     };
   }
-  if (record.version !== 4 || !isNavigationStepCount(navigation.textSteps)) return undefined;
+  if (record.version !== 4 && record.version !== 5) return undefined;
+  if (!isNavigationStepCount(navigation.textSteps)) return undefined;
   const shortcuts = parseShortcutsForActions(record.shortcuts, SHORTCUT_ACTIONS);
-  if (!shortcuts) return undefined;
+  const appearance = record.version === 5 ? parseReaderAppearance(record.appearance) : structuredClone(DEFAULT_READER_APPEARANCE);
+  if (!shortcuts || !appearance) return undefined;
   return {
-    version: 4,
+    version: 5,
     navigation: { textSteps: navigation.textSteps },
     shortcuts,
     pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
+    appearance,
   };
 }
 
@@ -186,10 +254,11 @@ function cloneShortcuts(shortcuts: Record<ShortcutAction, ShortcutBinding>): Rec
 
 export function cloneReaderSettings(settings: ReaderSettings): ReaderSettings {
   return {
-    version: 4,
+    version: 5,
     navigation: { ...settings.navigation },
     shortcuts: cloneShortcuts(settings.shortcuts),
     pageTransitions: settings.pageTransitions,
+    appearance: structuredClone(settings.appearance),
   };
 }
 

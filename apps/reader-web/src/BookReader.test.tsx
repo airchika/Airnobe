@@ -465,7 +465,7 @@ describe("BookReader", () => {
     expect(screen.getByText("按键…")).toBeInTheDocument();
     await user.keyboard("{Control>}x{/Control}");
     expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      version: 4,
+      version: 5,
       shortcuts: expect.objectContaining({ topBackward: { code: "KeyX", modifier: "Control" } }),
     }));
     const binding = screen.getByRole("button", { name: "修改从顶部回退快捷键" });

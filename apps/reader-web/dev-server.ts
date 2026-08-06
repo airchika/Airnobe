@@ -17,15 +17,19 @@ import {
   type CollectionStatus,
 } from "./library-store.js";
 import { readReaderSettings, writeReaderSettings } from "./settings-store.js";
+import { readCustomThemes, writeCustomTheme } from "./theme-store.js";
 import { parseReadingPosition, readingProgressSummary, type ReadingPosition } from "./src/reading-state.js";
 import { parseReaderSettings } from "./src/reader-settings.js";
+import { BUILTIN_THEMES, parseThemeDefinition } from "./src/themes.js";
 
 const APP_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_DIRECTORY = resolve(APP_DIRECTORY, "../..");
 const LIBRARY_DIRECTORY = resolve(REPOSITORY_DIRECTORY, "AirnobeLibrary");
 const LIBRARY_INDEX_PATH = join(LIBRARY_DIRECTORY, "library.json");
 const SETTINGS_PATH = join(LIBRARY_DIRECTORY, "user.json");
+const THEMES_DIRECTORY = join(LIBRARY_DIRECTORY, "themes");
 const MAX_EPUB_BYTES = 512 * 1024 * 1024;
+const MAX_THEME_BYTES = 64 * 1024;
 const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let mutationQueue: Promise<void> = Promise.resolve();
 
@@ -43,23 +47,23 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(JSON.stringify(value));
 }
 
-async function readRequestBytes(request: IncomingMessage): Promise<Uint8Array> {
+async function readRequestBytes(request: IncomingMessage, maximumBytes = MAX_EPUB_BYTES, sizeError = "EPUB 超过 512 MB。当前版本暂不支持。"): Promise<Uint8Array> {
   const declaredSize = Number(request.headers["content-length"] ?? 0);
-  if (declaredSize > MAX_EPUB_BYTES) throw new HttpError(413, "EPUB 超过 512 MB。当前版本暂不支持。");
+  if (declaredSize > maximumBytes) throw new HttpError(413, sizeError);
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += bytes.length;
-    if (size > MAX_EPUB_BYTES) throw new HttpError(413, "EPUB 超过 512 MB。当前版本暂不支持。");
+    if (size > maximumBytes) throw new HttpError(413, sizeError);
     chunks.push(bytes);
   }
   if (size === 0) throw new HttpError(400, "没有收到 EPUB 文件。");
   return Buffer.concat(chunks);
 }
 
-async function readRequestJson(request: IncomingMessage): Promise<unknown> {
-  const bytes = await readRequestBytes(request);
+async function readRequestJson(request: IncomingMessage, maximumBytes = MAX_EPUB_BYTES, sizeError?: string): Promise<unknown> {
+  const bytes = await readRequestBytes(request, maximumBytes, sizeError);
   try {
     return JSON.parse(Buffer.from(bytes).toString("utf8"));
   } catch {
@@ -294,9 +298,30 @@ async function sendReaderSettings(response: ServerResponse): Promise<void> {
 
 async function updateReaderSettings(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const settings = parseReaderSettings(await readRequestJson(request));
-  if (!settings) throw new HttpError(400, "阅读设置包含无效的回退/快进段数或快捷键。");
+  if (!settings) throw new HttpError(400, "阅读设置包含无效的排版、显示、导航或快捷键值。");
   await writeReaderSettings(SETTINGS_PATH, settings);
   sendJson(response, 200, settings);
+}
+
+async function sendThemes(response: ServerResponse): Promise<void> {
+  sendJson(response, 200, {
+    version: 1,
+    themes: [
+      ...BUILTIN_THEMES.map((theme) => ({ theme, builtin: true })),
+      ...(await readCustomThemes(THEMES_DIRECTORY)).map((theme) => ({ theme, builtin: false })),
+    ],
+  });
+}
+
+async function importTheme(themeId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const theme = parseThemeDefinition(await readRequestJson(request, MAX_THEME_BYTES, "主题 JSON 超过 64 KB。"));
+  if (!theme || theme.id !== themeId) throw new HttpError(400, "主题 JSON 格式无效或 ID 不一致。");
+  try {
+    await writeCustomTheme(THEMES_DIRECTORY, theme);
+  } catch (error) {
+    throw new HttpError(400, (error as Error).message);
+  }
+  sendJson(response, 200, { theme, builtin: false });
 }
 
 function localBookApi(): Plugin {
@@ -325,6 +350,15 @@ function localBookApi(): Plugin {
           }
           if (request.method === "PUT" && url.pathname === "/api/settings") {
             await enqueueMutation(() => updateReaderSettings(request, response));
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/themes") {
+            await sendThemes(response);
+            return;
+          }
+          const themeMatch = /^\/api\/themes\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/.exec(url.pathname);
+          if (request.method === "PUT" && themeMatch) {
+            await enqueueMutation(() => importTheme(themeMatch[1] as string, request, response));
             return;
           }
           const bookMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
