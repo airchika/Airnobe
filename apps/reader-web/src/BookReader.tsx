@@ -71,7 +71,6 @@ const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   pageUp: "向上翻页",
   pageDown: "向下翻页",
   toggleSidebar: "侧边栏",
-  returnLibrary: "返回书库",
 };
 
 interface TocEntry {
@@ -170,8 +169,8 @@ function ShortcutBindingButton({ action, binding, capturing, onCapture, spatialR
       aria-label={`修改${SHORTCUT_LABELS[action]}快捷键`}
       aria-pressed={capturing}
       data-spatial-item
-      data-spatial-zone="settings"
-      data-spatial-zone-order="1"
+      data-spatial-zone="shortcut-dialog"
+      data-spatial-zone-order="0"
       data-spatial-row={spatialRow}
       onClick={() => onCapture(action)}
     >
@@ -300,23 +299,21 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
   const [showAssistedRuby, setShowAssistedRuby] = useState(() => settings.appearance.display.showAssistedRuby);
   const [showKatakanaRomaji, setShowKatakanaRomaji] = useState(() => settings.appearance.display.showKatakanaRomaji);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [shortcutDialogOpen, setShortcutDialogOpen] = useState(false);
   const [currentRowIndex, setCurrentRowIndex] = useState<number>();
   const [navigation, setNavigation] = useState(settings.navigation);
-  const [navigationInput, setNavigationInput] = useState(String(settings.navigation.textSteps));
   const [shortcuts, setShortcuts] = useState(settings.shortcuts);
   const [capturingAction, setCapturingAction] = useState<ShortcutAction>();
   const [bindingError, setBindingError] = useState<string>();
-  const [navigationEditing, setNavigationEditing] = useState(false);
   const [pageTransitions, setPageTransitions] = useState(settings.pageTransitions);
   const readerRootRef = useRef<HTMLDivElement>(null);
   const sidebarRootRef = useRef<HTMLDivElement>(null);
-  const navigationInputRef = useRef<HTMLInputElement>(null);
-  const navigationEntryRef = useRef<HTMLLabelElement>(null);
+  const shortcutDialogRef = useRef<HTMLDivElement>(null);
+  const shortcutButtonRef = useRef<HTMLButtonElement>(null);
   const overlayReturnFocusRef = useRef<HTMLElement | null>(null);
   const pageTurnInProgressRef = useRef(false);
   const pageTurnTimerRef = useRef<number | undefined>(undefined);
   const pageTurnReleaseTimerRef = useRef<number | undefined>(undefined);
-  const navigationSaveRevisionRef = useRef(0);
   const shortcutSaveRevisionRef = useRef(0);
   const progressSaveTimerRef = useRef<number | undefined>(undefined);
   const progressFrameRef = useRef<number | undefined>(undefined);
@@ -530,7 +527,6 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
 
   useEffect(() => {
     setNavigation(settings.navigation);
-    setNavigationInput(String(settings.navigation.textSteps));
     setShortcuts(settings.shortcuts);
     setPageTransitions(settings.pageTransitions);
     setShowJapanese(settings.appearance.display.showJapanese);
@@ -586,32 +582,6 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     if (pageTurnReleaseTimerRef.current !== undefined) window.clearTimeout(pageTurnReleaseTimerRef.current);
   }, []);
 
-  const updateNavigationInput = useCallback((raw: string) => {
-    setNavigationInput(raw);
-    const parsed = Number(raw);
-    if (!isNavigationStepCount(parsed)) return;
-    if (parsed === navigation.textSteps) return;
-    const next: ReaderSettings = {
-      version: 8,
-      navigation: { textSteps: parsed },
-      shortcuts,
-      pageTransitions,
-      appearance: settings.appearance,
-    };
-    setNavigation(next.navigation);
-    const revision = navigationSaveRevisionRef.current + 1;
-    navigationSaveRevisionRef.current = revision;
-    void onSaveSettings(next).catch(() => {
-      if (navigationSaveRevisionRef.current !== revision) return;
-      setNavigation(settings.navigation);
-      setNavigationInput(String(settings.navigation.textSteps));
-    });
-  }, [navigation.textSteps, onSaveSettings, pageTransitions, settings.appearance, settings.navigation, shortcuts]);
-
-  const restoreInvalidNavigationInput = useCallback(() => {
-    if (!isNavigationStepCount(Number(navigationInput))) setNavigationInput(String(navigation.textSteps));
-  }, [navigation.textSteps, navigationInput]);
-
   const beginShortcutCapture = useCallback((action: ShortcutAction) => {
     setCapturingAction(action);
     setBindingError(undefined);
@@ -633,7 +603,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
   const closeSidebar = useCallback((restoreFocus = true) => {
     setCapturingAction(undefined);
     setBindingError(undefined);
-    setNavigationEditing(false);
+    setShortcutDialogOpen(false);
     setSidebarOpen(false);
     if (restoreFocus) restoreOverlayFocus();
   }, [restoreOverlayFocus]);
@@ -648,23 +618,25 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     setSidebarOpen(true);
   }, [closeSidebar, rememberOverlayFocus, sidebarOpen]);
 
-  const activateMenuItem = useCallback((element: HTMLElement): boolean => {
-    if (element.dataset.spatialAction !== "edit-navigation") return false;
-    setNavigationEditing(true);
-    requestAnimationFrame(() => {
-      navigationInputRef.current?.focus();
-      navigationInputRef.current?.select();
-    });
-    return true;
+  const closeShortcutDialog = useCallback(() => {
+    setCapturingAction(undefined);
+    setBindingError(undefined);
+    setShortcutDialogOpen(false);
+    requestAnimationFrame(() => shortcutButtonRef.current?.focus({ preventScroll: true }));
+  }, []);
+
+  const openShortcutDialog = useCallback(() => {
+    setBindingError(undefined);
+    setShortcutDialogOpen(true);
+    requestAnimationFrame(() => shortcutDialogRef.current?.querySelector<HTMLElement>("[data-spatial-item]")?.focus({ preventScroll: true }));
   }, []);
 
   useSpatialNavigation({
     rootRef: sidebarRootRef,
-    enabled: sidebarOpen && keyboardNavigationEnabled,
-    editing: Boolean(capturingAction) || navigationEditing,
+    enabled: sidebarOpen && !shortcutDialogOpen && keyboardNavigationEnabled,
     keys: "arrows",
-    onActivate: activateMenuItem,
   });
+  useSpatialNavigation({ rootRef: shortcutDialogRef, enabled: shortcutDialogOpen && keyboardNavigationEnabled, editing: Boolean(capturingAction), keys: "both" });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -703,7 +675,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
         const previousShortcuts = shortcuts;
         const nextShortcuts = { ...shortcuts, [capturingAction]: candidate };
         const next: ReaderSettings = {
-          version: 8,
+          version: 9,
           navigation,
           shortcuts: nextShortcuts,
           pageTransitions,
@@ -722,14 +694,20 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) return;
       if (event.isComposing) return;
+      if (event.key === "Escape" && shortcutDialogOpen) {
+        event.preventDefault();
+        closeShortcutDialog();
+        return;
+      }
       if (event.key === "Escape" && sidebarOpen) {
         event.preventDefault();
         closeSidebar();
         return;
       }
+      if (shortcutDialogOpen) return;
       const action = SHORTCUT_ACTIONS.find((candidate) => matchesShortcut(event, shortcuts[candidate]));
       if (!action) return;
-      if (event.repeat && ["toggleJapanese", "toggleAssistedRuby", "toggleKatakanaRomaji", "toggleSidebar", "returnLibrary"].includes(action)) return;
+      if (event.repeat && ["toggleJapanese", "toggleAssistedRuby", "toggleKatakanaRomaji", "toggleSidebar"].includes(action)) return;
       event.preventDefault();
       if (action === "toggleJapanese") toggleJapanese();
       else if (action === "toggleAssistedRuby") toggleAssistedRuby();
@@ -741,15 +719,10 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       else if (action === "pageUp") turnPage(-1);
       else if (action === "pageDown") turnPage(1);
       else if (action === "toggleSidebar") toggleSidebar();
-      else if (action === "returnLibrary") {
-        closeSidebar();
-        if (progressSaveTimerRef.current !== undefined) window.clearTimeout(progressSaveTimerRef.current);
-        void persistReadingPosition().catch(() => {}).then(onReturnToLibrary);
-      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [capturingAction, closeSidebar, jumpNavigationUnit, keyboardNavigationEnabled, navigation, onReturnToLibrary, onSaveSettings, pageTransitions, persistReadingPosition, settings.appearance, shortcuts, sidebarOpen, toggleAssistedRuby, toggleJapanese, toggleKatakanaRomaji, toggleSidebar, turnPage]);
+  }, [capturingAction, closeShortcutDialog, closeSidebar, jumpNavigationUnit, keyboardNavigationEnabled, navigation, onSaveSettings, pageTransitions, settings.appearance, shortcutDialogOpen, shortcuts, sidebarOpen, toggleAssistedRuby, toggleJapanese, toggleKatakanaRomaji, toggleSidebar, turnPage]);
 
   useEffect(() => {
     if (!sidebarOpen) return;
@@ -851,13 +824,11 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
           <ol className="toc-list">{tocEntries.map((entry, index) => <li key={entry.key} style={{ paddingLeft: `${10 + entry.depth * 16}px` }}>{entry.targetIndex === undefined ? <span>{entry.label}</span> : <button type="button" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(index + 1)} data-toc-key={entry.key} aria-current={activeTocEntry?.key === entry.key ? "location" : undefined} onClick={() => followTocEntry(entry)}>{entry.label}</button>}</li>)}</ol>
           {settings.appearance.display.showProgressBars && <div className="reader-progress-summary">{chapterProgress !== undefined && <label><span>{activeTocEntry?.label ?? "当前章节"}</span><progress max="1" value={chapterProgress} /><b>{Math.round(chapterProgress * 100)}%</b></label>}<label><span>全书</span><progress max="1" value={wholeProgress} /><b>{Math.round(wholeProgress * 100)}%</b></label></div>}
         </aside>
-        <aside className="reader-sidebar-settings" aria-label="阅读设置" data-spatial-zone-order="1"><button className="sidebar-return" type="button" data-spatial-item data-spatial-zone="settings" data-spatial-zone-order="1" data-spatial-row="0" onClick={() => void returnToLibrary()}>返回书库</button>
+        <aside className="reader-sidebar-settings" aria-label="阅读设置" data-spatial-zone-order="1"><div className="sidebar-top-actions"><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-zone-order="1" data-spatial-row="0" onClick={() => void returnToLibrary()}>返回书库</button><button ref={shortcutButtonRef} type="button" data-spatial-item data-spatial-zone="settings" data-spatial-zone-order="1" data-spatial-row="0" onClick={openShortcutDialog}>设置快捷键</button></div>
           <SettingsPanel embedded scope="reader" settings={settings} themes={themes} onPreview={(next) => { appearanceAnchorRef.current = captureReadingAnchor("top"); onPreviewSettings(next); }} onSave={onSaveSettings} onImport={onImportTheme} onThemesChange={onThemesChange} />
-          <section className="sidebar-shortcuts"><h3>快捷键与导航</h3>{SHORTCUT_ACTIONS.map((action, index) => <div className="reader-menu-shortcut-row" key={action}><span>{SHORTCUT_LABELS[action]}</span><ShortcutBindingButton action={action} binding={shortcuts[action]} capturing={capturingAction === action} onCapture={beginShortcutCapture} spatialRow={String(60 + index)} /></div>)}
-            <label className="reader-menu-setting" ref={navigationEntryRef} tabIndex={0} data-spatial-item data-spatial-zone="settings" data-spatial-zone-order="1" data-spatial-row="72" data-spatial-action="edit-navigation"><span>回退/快进段数</span><input ref={navigationInputRef} aria-label="回退/快进段数" type="number" min="1" max="99" value={navigationInput} onFocus={() => setNavigationEditing(true)} onChange={(event) => updateNavigationInput(event.target.value)} onBlur={() => { setNavigationEditing(false); restoreInvalidNavigationInput(); }} /></label>{bindingError && <p className="reader-menu-error" role="alert">{bindingError}</p>}
-          </section>
         </aside>
       </div>}
+      {shortcutDialogOpen && <div className="shortcut-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShortcutDialog(); }}><div className="shortcut-dialog" ref={shortcutDialogRef} role="dialog" aria-modal="true" aria-label="快捷键设置"><header><h2>快捷键</h2><button type="button" data-spatial-item data-spatial-zone="shortcut-dialog" data-spatial-row="0" aria-label="关闭快捷键设置" onClick={closeShortcutDialog}>×</button></header><div className="shortcut-dialog-list">{SHORTCUT_ACTIONS.map((action, index) => <div className="reader-menu-shortcut-row" key={action}><span>{SHORTCUT_LABELS[action]}</span><ShortcutBindingButton action={action} binding={shortcuts[action]} capturing={capturingAction === action} onCapture={beginShortcutCapture} spatialRow={String(index + 1)} /></div>)}</div>{bindingError && <p className="reader-menu-error" role="alert">{bindingError}</p>}</div></div>}
     </div>
   );
 }

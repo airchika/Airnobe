@@ -95,29 +95,29 @@ describe("BookReader", () => {
     Reflect.deleteProperty(document, "startViewTransition");
   });
 
-  it("keeps Q, E, and Z independent while publisher ruby remains visible", async () => {
+  it("keeps 1, 2, and 3 independent while publisher ruby remains visible", async () => {
     const user = userEvent.setup();
     render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
 
     expect(document.querySelectorAll("[data-japanese-variant]")).toHaveLength(0);
-    await user.keyboard("q");
+    await user.keyboard("1");
     expect(document.querySelectorAll("[data-japanese-variant]").length).toBeGreaterThan(0);
     expect(screen.getByText("まち")).toBeInTheDocument();
     expect(screen.getByText("とびら").parentElement).toHaveClass("ruby--hidden");
     expect(screen.getByText("まど").parentElement).toHaveClass("ruby--hidden");
     expect(screen.getByText("konpyūtā").parentElement).toHaveClass("ruby--hidden");
 
-    await user.keyboard("e");
+    await user.keyboard("2");
     expect(screen.getByText("まち")).toBeInTheDocument();
     expect(screen.getByText("とびら")).toBeInTheDocument();
     expect(screen.getByText("まど")).toBeInTheDocument();
     expect(screen.getByText("konpyūtā").parentElement).toHaveClass("ruby--hidden");
 
-    await user.keyboard("z");
+    await user.keyboard("3");
     expect(screen.getByText("konpyūtā")).toBeInTheDocument();
     expect(screen.getByText("まど")).toBeInTheDocument();
 
-    await user.keyboard("q");
+    await user.keyboard("1");
     expect(document.querySelectorAll("[data-japanese-variant]")).toHaveLength(0);
     openReaderMenu();
     expect(screen.getByLabelText("阅读侧边栏")).toBeInTheDocument();
@@ -220,16 +220,16 @@ describe("BookReader", () => {
     expect(currentTocEntry(entries, 2)?.label).toBe("第一章");
   });
 
-  it("opens one peer sidebar with Digit1 and exposes TOC, settings, progress and return", async () => {
+  it("opens one peer sidebar with Q and exposes TOC, settings, progress and return", async () => {
     const user = userEvent.setup();
     render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
-    await user.keyboard("1");
+    await user.keyboard("q");
     expect(screen.getByLabelText("阅读侧边栏")).toBeInTheDocument();
     expect(screen.getByLabelText("目录")).toBeInTheDocument();
     expect(screen.getAllByLabelText("阅读设置").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "返回书库" })).toBeInTheDocument();
     expect(screen.getByText("全书")).toBeInTheDocument();
-    await user.keyboard("1");
+    await user.keyboard("q");
     expect(screen.queryByLabelText("阅读侧边栏")).not.toBeInTheDocument();
   });
 
@@ -237,15 +237,16 @@ describe("BookReader", () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => {});
     render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={DEFAULT_READER_SETTINGS} onSaveSettings={save} />);
-    await user.keyboard("1");
+    await user.keyboard("q");
+    await user.click(screen.getByRole("button", { name: "设置快捷键" }));
     await user.click(screen.getByRole("button", { name: "修改侧边栏快捷键" }));
     fireEvent.keyDown(window, { key: "m", code: "KeyM", ctrlKey: true });
     expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ shortcuts: expect.objectContaining({ toggleSidebar: { code: "KeyM", modifier: "Control" } }) }));
-    fireEvent.change(screen.getByLabelText("回退/快进段数"), { target: { value: "4" } });
-    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ navigation: { textSteps: 4 } }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "回退/快进段数" }), { target: { value: "4" } });
+    await waitFor(() => expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ navigation: { textSteps: 4 } })));
   });
 
-  it("leaves a pure Chinese book unchanged when Q, E, and Z are pressed", async () => {
+  it("leaves a pure Chinese book unchanged when 1, 2, and 3 are pressed", async () => {
     const user = userEvent.setup();
     const chinese = createDemoBook();
     delete chinese.book.derivation;
@@ -257,11 +258,11 @@ describe("BookReader", () => {
     }
     render(<BookReader loaded={chinese} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
     const before = document.querySelector(".virtual-book")?.textContent;
-    await user.keyboard("qez");
+    await user.keyboard("123");
     expect(document.querySelector(".virtual-book")?.textContent).toBe(before);
   });
 
-  it("uses bottom W/S and top R/F anchors with two-text jumps while skipping a divider", async () => {
+  it("uses bottom W/S and top E/F anchors with two-text jumps while skipping a divider", async () => {
     const user = userEvent.setup();
     const scrollTo = vi.spyOn(window, "scrollTo");
     const loaded = createLongBook(30);
@@ -291,7 +292,7 @@ describe("BookReader", () => {
     expect(nextTop).toBeGreaterThan(previousTop);
 
     scrollTo.mockClear();
-    await user.keyboard("r");
+    await user.keyboard("e");
     const topPrevious = Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)));
     scrollTo.mockClear();
     await user.keyboard("f");

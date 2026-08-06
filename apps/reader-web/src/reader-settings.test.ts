@@ -1,38 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_READER_SETTINGS, parseReaderSettings } from "./reader-settings.js";
+import { DEFAULT_READER_SETTINGS, DEFAULT_SHORTCUTS, parseReaderSettings } from "./reader-settings.js";
 
-describe("reader settings v8", () => {
-  it("accepts and clones the current settings", () => {
-    expect(parseReaderSettings(structuredClone(DEFAULT_READER_SETTINGS))).toEqual(DEFAULT_READER_SETTINGS);
+describe("reader settings v9", () => {
+  it("accepts the current settings and the 800 weight", () => {
+    const settings = structuredClone(DEFAULT_READER_SETTINGS);
+    settings.appearance.typography.fontWeight = 800;
+    expect(parseReaderSettings(settings)).toEqual(settings);
   });
 
-  it("migrates v6 appearance and menu shortcuts", () => {
-    const { toggleSidebar: _sidebar, returnLibrary: _library, ...reading } = DEFAULT_READER_SETTINGS.shortcuts;
+  it("migrates v8 appearance and navigation while resetting shortcuts", () => {
     const migrated = parseReaderSettings({
-      version: 6,
-      navigation: { textSteps: 4 },
-      shortcuts: { ...reading, toggleMenu: { code: "Digit1" }, toggleToc: { code: "Digit2" } },
-      pageTransitions: true,
-      appearance: {
-        themeId: "warm-paper",
-        typography: { fontSize: 20, fontWeight: 600, lineHeight: 1.7, paragraphSpacing: 1.2, columnWidth: 800, japaneseOpacity: 0.5 },
-        defaults: { showJapanese: true, showAssistedRuby: false, showKatakanaRomaji: true },
+      version: 8,
+      navigation: { textSteps: 12 },
+      shortcuts: {
+        toggleJapanese: { code: "KeyQ" }, toggleAssistedRuby: { code: "KeyE" }, toggleKatakanaRomaji: { code: "KeyZ" },
+        topBackward: { code: "KeyR" }, topForward: { code: "KeyF" }, bottomBackward: { code: "KeyW" }, bottomForward: { code: "KeyS" },
+        pageUp: { code: "KeyA" }, pageDown: { code: "KeyD" }, toggleSidebar: { code: "Digit1" }, returnLibrary: { code: "Digit2" },
       },
+      pageTransitions: true,
+      appearance: structuredClone(DEFAULT_READER_SETTINGS.appearance),
     });
-    expect(migrated).toMatchObject({ version: 8, navigation: { textSteps: 4 }, pageTransitions: true });
-    expect(migrated?.shortcuts.toggleSidebar).toEqual({ code: "Digit1" });
-    expect(migrated?.shortcuts.returnLibrary).toEqual({ code: "Digit2" });
-    expect(migrated?.appearance.theme).toMatchObject({ mode: "day", lightThemeId: "warm-paper" });
-    expect(migrated?.appearance.display).toMatchObject({ showJapanese: true, showKatakanaRomaji: true });
-    expect(migrated?.appearance.typography.rubyScale).toBe(0.6);
+    expect(migrated).toMatchObject({ version: 9, navigation: { textSteps: 10 }, pageTransitions: true });
+    expect(migrated?.shortcuts).toEqual(DEFAULT_SHORTCUTS);
+    expect(migrated?.appearance).toEqual(DEFAULT_READER_SETTINGS.appearance);
   });
 
-  it("rejects invalid ruby size and duplicate bindings", () => {
-    const invalid = structuredClone(DEFAULT_READER_SETTINGS);
-    invalid.appearance.typography.rubyScale = 0.9;
-    expect(parseReaderSettings(invalid)).toBeUndefined();
+  it("rejects invalid current values and duplicate bindings", () => {
+    const invalidRuby = structuredClone(DEFAULT_READER_SETTINGS);
+    invalidRuby.appearance.typography.rubyScale = 0.9;
+    expect(parseReaderSettings(invalidRuby)).toBeUndefined();
+    const invalidSteps = structuredClone(DEFAULT_READER_SETTINGS);
+    invalidSteps.navigation.textSteps = 11;
+    expect(parseReaderSettings(invalidSteps)).toBeUndefined();
     const duplicate = structuredClone(DEFAULT_READER_SETTINGS);
-    duplicate.shortcuts.returnLibrary = duplicate.shortcuts.toggleSidebar;
+    duplicate.shortcuts.pageDown = duplicate.shortcuts.pageUp;
     expect(parseReaderSettings(duplicate)).toBeUndefined();
   });
 });

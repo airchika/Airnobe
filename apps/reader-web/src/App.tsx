@@ -15,7 +15,6 @@ import { createDemoBook } from "./demo-book.js";
 import {
   deleteLibraryBook,
   loadLibrary,
-  reimportLibraryBook,
   updateLibraryBook,
   type CollectionStatus,
   type LibraryBook,
@@ -249,21 +248,6 @@ export function App() {
     }
   };
 
-  const reimportBook = async (bookId: string): Promise<void> => {
-    setLoading("正在重新导入…");
-    setError(undefined);
-    setNotice(undefined);
-    try {
-      const result = await reimportLibraryBook(bookId);
-      await refreshLibrary(bookId);
-      setNotice(result.warning ?? "已使用保存的原始 EPUB 重新生成阅读数据。");
-    } catch (reimportError) {
-      setError((reimportError as Error).message);
-    } finally {
-      setLoading(undefined);
-    }
-  };
-
   const confirmDeleteBook = async (): Promise<void> => {
     const prompt = deletePrompt;
     if (!prompt) return;
@@ -358,8 +342,7 @@ export function App() {
             onOpenSettings={() => setSettingsOpen(true)}
             onRead={(bookId, mode) => void readLibraryBook(bookId, mode)}
             onUpdate={updateBook}
-            onReimport={(bookId) => void reimportBook(bookId)}
-            onDelete={(bookId) => {
+              onDelete={(bookId) => {
               const book = libraryBooks.find((candidate) => candidate.id === bookId);
               if (book) setDeletePrompt({ bookId, title: book.title });
             }}

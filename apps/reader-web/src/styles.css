@@ -1,10 +1,4 @@
 @font-face {
-  font-family: "Sarasa UI SC";
-  src: url("../../../Font/SarasaUiSC-Regular.ttf") format("truetype");
-  font-display: swap;
-}
-
-@font-face {
   font-family: "Sarasa Gothic SC";
   src: url("../../../Font/SarasaGothicSC-Regular.ttf") format("truetype");
   font-weight: 400;
@@ -19,9 +13,23 @@
 }
 
 @font-face {
+  font-family: "Sarasa Gothic SC";
+  src: url("../../../Font/SarasaGothicSC-Bold.ttf") format("truetype");
+  font-weight: 800;
+  font-display: swap;
+}
+
+@font-face {
   font-family: "Sarasa Gothic J";
   src: url("../../../Font/SarasaGothicJ-Regular.ttf") format("truetype");
   font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Sarasa Gothic J";
+  src: url("../../../Font/SarasaGothicJ-Bold.ttf") format("truetype");
+  font-weight: 800;
   font-display: swap;
 }
 
@@ -34,7 +42,7 @@
 
 :root {
   color-scheme: dark;
-  font-family: "Sarasa UI SC", "Microsoft YaHei UI", sans-serif;
+  font-family: "Sarasa Gothic SC", "Microsoft YaHei UI", sans-serif;
   color: var(--text);
   background: var(--background);
   font-synthesis: none;
@@ -58,6 +66,8 @@
   --ruby-romaji: #d7a85c;
   --danger: #e07a7a;
   --reading-width: 760px;
+  --focus-fill: var(--accent-soft);
+  --focus-fill: color-mix(in srgb, var(--accent) 26%, var(--surface));
 }
 
 * {
@@ -91,8 +101,8 @@ button {
 button:focus-visible,
 a:focus-visible,
 [data-spatial-item]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+  outline: 0;
+  background: var(--focus-fill);
 }
 
 .app-spatial-overlays {
@@ -626,16 +636,13 @@ rt {
   display: none;
 }
 
-.ruby--generated rt {
-  color: var(--ruby-generated);
-}
-
-.ruby--reused rt {
-  color: var(--ruby-reused);
+.ruby--generated rt,
+.ruby--reused rt,
+.ruby--romaji rt {
+  color: inherit;
 }
 
 .ruby--romaji rt {
-  color: var(--ruby-romaji);
   letter-spacing: 0.02em;
 }
 
@@ -658,7 +665,7 @@ rt {
   color: var(--danger);
 }
 
-.content-variant strong { font-weight: 600; }
+.content-variant strong { font-weight: 800; }
 
 .image-block {
   margin: 44px auto;
@@ -1263,3 +1270,151 @@ button:hover,
   .reader-sidebar { grid-template-columns: minmax(170px, 21vw) minmax(280px, 1fr) minmax(230px, 29vw); }
   .reader-app--sidebar-open .reading-column { width: min(var(--reading-width), calc(50vw - 40px)); min-width: 280px; }
 }
+
+/* P1f flat state language. */
+.font-japanese { font-family: "Sarasa Gothic J", "Yu Gothic", sans-serif; }
+
+button:hover,
+.secondary-action:hover,
+.library-row:hover { border-color: var(--line); background: var(--surface-raised); }
+.primary-action:hover { border-color: var(--accent); background: var(--accent); filter: brightness(1.08); }
+.danger-action:hover { border-color: var(--danger); background: var(--danger); filter: brightness(1.06); }
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[data-spatial-item]:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+[data-spatial-item]:focus-visible { background: var(--focus-fill); }
+
+.library-filters button[aria-pressed="true"],
+.theme-options button[aria-pressed="true"],
+.settings-segmented button[aria-pressed="true"],
+.settings-choice-row button[aria-pressed="true"],
+.settings-toggle[aria-pressed="true"],
+.toc-list li > button[aria-current="location"],
+.library-popup button[aria-selected="true"] {
+  border-color: transparent;
+  color: var(--text);
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+
+.library-filters button[aria-pressed="true"]:focus-visible,
+.theme-options button[aria-pressed="true"]:focus-visible,
+.settings-segmented button[aria-pressed="true"]:focus-visible,
+.settings-choice-row button[aria-pressed="true"]:focus-visible,
+.settings-toggle[aria-pressed="true"]:focus-visible,
+.toc-list li > button[aria-current="location"]:focus-visible,
+.library-popup button[aria-selected="true"]:focus-visible {
+  color: var(--text);
+  background: var(--focus-fill);
+}
+
+.library-row[data-selected="true"] { background: var(--accent-soft); box-shadow: none; }
+.library-row:focus-within { background: var(--focus-fill); }
+
+.library-list-header,
+.library-row { grid-template-columns: minmax(0, 1fr) 110px 130px; }
+.library-row { min-height: 50px; padding: 5px 12px; }
+.library-row > span,
+.library-row > button {
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 400;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-row > button { min-height: 38px; padding: 0 7px; cursor: pointer; }
+.library-row > span { padding: 0 7px; }
+.library-row-status { border-radius: 7px; }
+
+.library-detail-heading p,
+.library-metadata { color: var(--text); font-size: 14px; }
+.library-detail-heading p { margin-top: 5px; }
+.library-metadata dt,
+.library-metadata dd { color: var(--text); }
+
+.library-popup-layer {
+  position: fixed;
+  z-index: 140;
+  inset: 0;
+}
+.library-popup {
+  position: fixed;
+  width: 180px;
+  display: grid;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: 0 16px 48px #00000055;
+}
+.library-popup button,
+.library-popup a {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+}
+.library-popup button:hover,
+.library-popup a:hover { background: var(--surface); }
+
+.settings-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+.settings-section-heading h3 { margin: 0; }
+.settings-segmented { display: grid; grid-template-columns: repeat(3, 1fr); overflow: hidden; border-radius: 7px; background: var(--surface); }
+.settings-segmented button { min-height: 34px; padding: 0 11px; border: 0; border-radius: 0; background: transparent; }
+.theme-options { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.theme-options button[aria-pressed="true"] { border-color: transparent; }
+.settings-weight-row button { min-width: 0; flex: 1 1 0; padding: 0 8px; }
+.appearance-number-entry input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+.appearance-number-entry input[type="number"]::-webkit-inner-spin-button,
+.appearance-number-entry input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; -webkit-appearance: none; }
+
+.sidebar-top-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 12px; }
+.sidebar-top-actions button { min-width: 0; min-height: 40px; }
+
+.shortcut-dialog-backdrop {
+  position: fixed;
+  z-index: 150;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: #00000038;
+}
+.shortcut-dialog {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-raised);
+  box-shadow: 0 20px 70px #00000066;
+}
+.shortcut-dialog header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.shortcut-dialog h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.shortcut-dialog header button { width: 34px; height: 34px; border: 0; background: transparent; font-size: 20px; }
+.shortcut-dialog-list { display: grid; gap: 5px; }
+.shortcut-dialog .reader-menu-shortcut-row { margin: 0; }
