@@ -4,6 +4,7 @@ import type { InlineNode, LinkTarget } from "@airnobe/book-format";
 interface InlineContentProps {
   nodes: InlineNode[];
   showAssistedRuby: boolean;
+  showKatakanaRomaji: boolean;
   assetUrlById: Map<string, string>;
   onInternalLink(target: Extract<LinkTarget, { kind: "internal" }>): void;
 }
@@ -11,6 +12,7 @@ interface InlineContentProps {
 export function InlineContent({
   nodes,
   showAssistedRuby,
+  showKatakanaRomaji,
   assetUrlById,
   onInternalLink,
 }: InlineContentProps): ReactNode {
@@ -20,13 +22,21 @@ export function InlineContent({
       case "text":
         return <Fragment key={key}>{node.value}</Fragment>;
       case "ruby": {
-        if (node.origin !== "source" && !showAssistedRuby) {
+        const visible = node.readingType === "romaji"
+          ? showKatakanaRomaji
+          : node.origin === "source" || showAssistedRuby;
+        if (!visible) {
           return <Fragment key={key}>{node.segments.map((segment) => segment.base).join("")}</Fragment>;
         }
         return (
           <Fragment key={key}>
             {node.segments.map((segment, segmentIndex) => (
-              <ruby className={`ruby ruby--${node.origin}`} data-ruby-origin={node.origin} key={`${key}-${segmentIndex}`}>
+              <ruby
+                className={`ruby ruby--${node.origin}${node.readingType === "romaji" ? " ruby--romaji" : ""}`}
+                data-ruby-origin={node.origin}
+                data-ruby-reading-type={node.readingType}
+                key={`${key}-${segmentIndex}`}
+              >
                 {segment.base}<rt>{segment.reading}</rt>
               </ruby>
             ))}
@@ -38,6 +48,7 @@ export function InlineContent({
           <InlineContent
             nodes={node.children}
             showAssistedRuby={showAssistedRuby}
+            showKatakanaRomaji={showKatakanaRomaji}
             assetUrlById={assetUrlById}
             onInternalLink={onInternalLink}
           />
@@ -59,6 +70,7 @@ export function InlineContent({
           <InlineContent
             nodes={node.children}
             showAssistedRuby={showAssistedRuby}
+            showKatakanaRomaji={showKatakanaRomaji}
             assetUrlById={assetUrlById}
             onInternalLink={onInternalLink}
           />

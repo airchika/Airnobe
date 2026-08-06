@@ -106,6 +106,7 @@ export async function convertEpubBytes(bytes: Uint8Array, sourceFileName: string
       sourceRubyCount: state.sourceRubyCount,
       reusedRubyCount: 0,
       generatedRubyCount: 0,
+      katakanaRomajiCount: 0,
       assetCount: assetPayloads.length,
       unclassifiedTextCount: state.unclassifiedTextCount,
     },

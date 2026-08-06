@@ -268,7 +268,7 @@ function rubyNodes(element: Element, state: ConversionState): InlineNode[] {
   }
   if (segments.length === 0) return [{ type: "text", value: nodeTextWithoutRubyAnnotations(element) }];
   state.sourceRubyCount += 1;
-  const result: InlineNode[] = [{ type: "ruby", segments, origin: "source" }];
+  const result: InlineNode[] = [{ type: "ruby", segments, origin: "source", readingType: "kana" }];
   if (pendingBase) result.push({ type: "text", value: pendingBase });
   return result;
 }

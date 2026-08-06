@@ -137,7 +137,7 @@ export async function importLibraryBook(args: {
   const index = await readLibraryIndex(indexPath);
   const sourceSha256 = createHash("sha256").update(args.bytes).digest("hex");
   const exact = findExactDuplicate(index, sourceSha256);
-  if (exact) throw new Error(`EPUB 已存在于书库：${exact.id}`);
+  if (exact && exact.id !== args.replaceBookId) throw new Error(`EPUB 已存在于书库：${exact.id}`);
 
   const previous = args.replaceBookId
     ? index.books.find((entry) => entry.id === args.replaceBookId)

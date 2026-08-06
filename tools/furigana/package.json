@@ -23,7 +23,8 @@
   "dependencies": {
     "@airnobe/book-format": "0.1.0",
     "@airnobe/epub-normalizer": "0.1.0",
-    "kuromoji": "^0.1.2"
+    "kuromoji": "^0.1.2",
+    "wanakana": "^5.3.1"
   },
   "devDependencies": {
     "@types/kuromoji": "^0.1.3"

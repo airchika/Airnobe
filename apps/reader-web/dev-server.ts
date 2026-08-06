@@ -3,16 +3,21 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BookManifestSchema, type BookManifest } from "@airnobe/book-format";
+import { AIRNOBE_FORMAT_VERSION, BookManifestSchema, type BookManifest } from "@airnobe/book-format";
 import { inspectEpubBytes } from "@airnobe/epub-normalizer";
 import { createServer, type Plugin } from "vite";
 import { importLibraryBook } from "./library-import.js";
+import { readReadingState, writeReadingState } from "./reading-state-store.js";
 import {
   findExactDuplicate,
   findProbableDuplicates,
   readLibraryIndex,
+  updateLibraryEntry,
+  writeLibraryIndexAtomically,
+  type CollectionStatus,
 } from "./library-store.js";
 import { readReaderSettings, writeReaderSettings } from "./settings-store.js";
+import { parseReadingPosition, readingProgressSummary, type ReadingPosition } from "./src/reading-state.js";
 import { parseReaderSettings } from "./src/reader-settings.js";
 
 const APP_DIRECTORY = dirname(fileURLToPath(import.meta.url));
@@ -22,7 +27,7 @@ const LIBRARY_INDEX_PATH = join(LIBRARY_DIRECTORY, "library.json");
 const SETTINGS_PATH = join(LIBRARY_DIRECTORY, "user.json");
 const MAX_EPUB_BYTES = 512 * 1024 * 1024;
 const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-let importQueue: Promise<void> = Promise.resolve();
+let mutationQueue: Promise<void> = Promise.resolve();
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -58,7 +63,7 @@ async function readRequestJson(request: IncomingMessage): Promise<unknown> {
   try {
     return JSON.parse(Buffer.from(bytes).toString("utf8"));
   } catch {
-    throw new HttpError(400, "阅读设置不是有效 JSON。");
+    throw new HttpError(400, "请求正文不是有效 JSON。");
   }
 }
 
@@ -78,6 +83,10 @@ function libraryBookDirectory(bookId: string): string {
   return resolve(LIBRARY_DIRECTORY, "books", bookId);
 }
 
+function readingStatePath(bookId: string): string {
+  return resolve(libraryBookDirectory(bookId), "reading-state.json");
+}
+
 function resolveBookFile(directory: string, relativePath: string): string {
   const target = resolve(directory, relativePath);
   if (!target.startsWith(`${directory}${sep}`)) throw new HttpError(500, "转换结果包含不安全的路径。");
@@ -93,6 +102,15 @@ async function readBook(directory: string): Promise<BookManifest> {
   }
 }
 
+async function storedBookUsesCurrentFormat(bookId: string): Promise<boolean> {
+  try {
+    const value = JSON.parse(await readFile(join(libraryBookDirectory(bookId), "book.json"), "utf8")) as { version?: unknown };
+    return value.version === AIRNOBE_FORMAT_VERSION;
+  } catch {
+    return false;
+  }
+}
+
 async function importEpub(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const fileName = decodeFileName(request);
   if (extname(fileName).toLowerCase() !== ".epub") throw new HttpError(400, "请选择 EPUB 文件。");
@@ -101,6 +119,23 @@ async function importEpub(request: IncomingMessage, response: ServerResponse): P
   const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
   const exact = findExactDuplicate(index, sourceSha256);
   if (exact) {
+    if (!await storedBookUsesCurrentFormat(exact.id)) {
+      const result = await importLibraryBook({
+        libraryDirectory: LIBRARY_DIRECTORY,
+        bytes,
+        fileName,
+        replaceBookId: exact.id,
+      });
+      sendJson(response, 200, {
+        outcome: "imported",
+        bookId: result.entry.id,
+        annotationStatus: result.entry.annotationStatus,
+        warning: result.annotationError
+          ? `旧版转换结果已重新生成，但程序注音失败，只能打开基础版本：${result.annotationError}`
+          : "旧版转换结果已按当前格式重新生成。",
+      });
+      return;
+    }
     sendJson(response, 200, {
       outcome: "exact-duplicate",
       book: { id: exact.id, title: exact.title, authors: exact.authors },
@@ -141,10 +176,51 @@ async function importEpub(request: IncomingMessage, response: ServerResponse): P
   });
 }
 
-function enqueueImport(task: () => Promise<void>): Promise<void> {
-  const pending = importQueue.then(task, task);
-  importQueue = pending.catch(() => {});
+function enqueueMutation(task: () => Promise<void>): Promise<void> {
+  const pending = mutationQueue.then(task, task);
+  mutationQueue = pending.catch(() => {});
   return pending;
+}
+
+async function sendLibrary(response: ServerResponse): Promise<void> {
+  const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
+  const books = await Promise.all(index.books.map(async (book) => ({
+    ...book,
+    readingProgress: readingProgressSummary(await readReadingState(readingStatePath(book.id))),
+  })));
+  sendJson(response, 200, { ...index, books });
+}
+
+function parseLibraryPatch(value: unknown): { collectionStatus?: CollectionStatus; note?: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HttpError(400, "书籍修改内容无效。");
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length === 0 || keys.some((key) => key !== "collectionStatus" && key !== "note")) {
+    throw new HttpError(400, "只能修改收藏状态和备注。");
+  }
+  const statuses: CollectionStatus[] = ["wish", "reading", "completed", "on-hold", "dropped"];
+  if (record.collectionStatus !== undefined && !statuses.includes(record.collectionStatus as CollectionStatus)) {
+    throw new HttpError(400, "收藏状态无效。");
+  }
+  if (record.note !== undefined && (typeof record.note !== "string" || record.note.length > 10_000)) {
+    throw new HttpError(400, "备注必须是不超过 10000 个字符的文本。");
+  }
+  return {
+    ...(record.collectionStatus !== undefined ? { collectionStatus: record.collectionStatus as CollectionStatus } : {}),
+    ...(record.note !== undefined ? { note: record.note as string } : {}),
+  };
+}
+
+async function updateLibraryBook(bookId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const patch = parseLibraryPatch(await readRequestJson(request));
+  const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
+  const updated = updateLibraryEntry(index, bookId, patch);
+  if (!updated) throw new HttpError(404, "书籍不存在。");
+  await writeLibraryIndexAtomically(LIBRARY_INDEX_PATH, updated.index);
+  const readingProgress = readingProgressSummary(await readReadingState(readingStatePath(bookId)));
+  sendJson(response, 200, { ...updated.entry, readingProgress });
 }
 
 async function sendBookBundle(bookId: string, response: ServerResponse): Promise<void> {
@@ -158,7 +234,27 @@ async function sendBookBundle(bookId: string, response: ServerResponse): Promise
   } catch {
     report = undefined;
   }
-  sendJson(response, 200, { book, documents, report });
+  const readingState = await readReadingState(readingStatePath(bookId));
+  sendJson(response, 200, { book, documents, report, readingState });
+}
+
+function parseReadingPositionRequest(value: unknown): ReadingPosition | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HttpError(400, "阅读进度无效。");
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== 1 || !("position" in record)) throw new HttpError(400, "阅读进度无效。");
+  if (record.position === null) return null;
+  const position = parseReadingPosition(record.position);
+  if (!position) throw new HttpError(400, "阅读进度无效。");
+  return position;
+}
+
+async function updateReadingState(bookId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const directory = libraryBookDirectory(bookId);
+  await readBook(directory);
+  const position = parseReadingPositionRequest(await readRequestJson(request));
+  sendJson(response, 200, await writeReadingState(readingStatePath(bookId), position));
 }
 
 async function sendAsset(bookId: string, assetId: string, response: ServerResponse): Promise<void> {
@@ -198,7 +294,7 @@ async function sendReaderSettings(response: ServerResponse): Promise<void> {
 
 async function updateReaderSettings(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const settings = parseReaderSettings(await readRequestJson(request));
-  if (!settings) throw new HttpError(400, "阅读设置必须包含 1–99 的整数回退段数和快进段数。");
+  if (!settings) throw new HttpError(400, "阅读设置包含无效的回退/快进段数或快捷键。");
   await writeReaderSettings(SETTINGS_PATH, settings);
   sendJson(response, 200, settings);
 }
@@ -211,7 +307,16 @@ function localBookApi(): Plugin {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         try {
           if (request.method === "POST" && url.pathname === "/api/import-epub") {
-            await enqueueImport(() => importEpub(request, response));
+            await enqueueMutation(() => importEpub(request, response));
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/library") {
+            await sendLibrary(response);
+            return;
+          }
+          const libraryBookMatch = /^\/api\/library\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
+          if (request.method === "PATCH" && libraryBookMatch) {
+            await enqueueMutation(() => updateLibraryBook(libraryBookMatch[1] as string, request, response));
             return;
           }
           if (request.method === "GET" && url.pathname === "/api/settings") {
@@ -219,12 +324,17 @@ function localBookApi(): Plugin {
             return;
           }
           if (request.method === "PUT" && url.pathname === "/api/settings") {
-            await updateReaderSettings(request, response);
+            await enqueueMutation(() => updateReaderSettings(request, response));
             return;
           }
           const bookMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
           if (request.method === "GET" && bookMatch) {
             await sendBookBundle(bookMatch[1] as string, response);
+            return;
+          }
+          const readingStateMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/reading-state$/i.exec(url.pathname);
+          if (request.method === "PUT" && readingStateMatch) {
+            await enqueueMutation(() => updateReadingState(readingStateMatch[1] as string, request, response));
             return;
           }
           const assetMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/assets\/([^/]+)$/i.exec(url.pathname);

@@ -9,6 +9,12 @@ import {
   type ConversionReport,
   type InlineNode,
 } from "@airnobe/book-format";
+import {
+  EMPTY_READING_STATE,
+  parseReadingState,
+  type ReadingPosition,
+  type ReadingState,
+} from "./reading-state.js";
 
 export interface LoadedBook {
   book: BookManifest;
@@ -16,6 +22,8 @@ export interface LoadedBook {
   documentById: Map<string, BookDocument>;
   assetUrlById: Map<string, string>;
   report?: ConversionReport;
+  libraryBookId?: string;
+  readingState: ReadingState;
   sourceLabel: string;
   sourceEpubUrl?: string;
   dispose(): void;
@@ -28,7 +36,7 @@ export interface LibraryBookSummary {
 }
 
 export type EpubImportResult =
-  | { outcome: "imported"; loaded: LoadedBook; warning?: string }
+  | { outcome: "imported"; bookId: string; warning?: string }
   | { outcome: "exact-duplicate"; book: LibraryBookSummary }
   | { outcome: "possible-duplicate"; candidates: LibraryBookSummary[] };
 
@@ -40,6 +48,7 @@ interface BookBundle {
   book: unknown;
   documents: unknown;
   report?: unknown;
+  readingState?: unknown;
 }
 
 function normalizeRelativePath(value: string): string {
@@ -118,6 +127,7 @@ function createLoadedBook(
   bookValue: unknown,
   documentValues: unknown,
   reportValue: unknown,
+  readingStateValue: unknown,
   sourceLabel: string,
   assetUrl: (assetId: string) => string,
   dispose: () => void,
@@ -128,12 +138,14 @@ function createLoadedBook(
   const graphErrors = validateBookGraph(book, documents);
   if (graphErrors.length > 0) throw new Error(`书籍引用校验失败：\n${graphErrors.join("\n")}`);
   const report = reportValue === undefined ? undefined : ConversionReportSchema.parse(reportValue);
+  const readingState = parseReadingState(readingStateValue) ?? structuredClone(EMPTY_READING_STATE);
   return {
     book,
     documents,
     documentById: new Map(documents.map((document) => [document.id, document])),
     assetUrlById: new Map(book.assets.map((asset) => [asset.id, assetUrl(asset.id)])),
     ...(report ? { report } : {}),
+    readingState,
     sourceLabel,
     dispose,
   };
@@ -162,10 +174,12 @@ export async function loadBookFromApi(bookId: string): Promise<LoadedBook> {
     value.book,
     value.documents,
     value.report,
+    value.readingState,
     "本地 EPUB",
     (assetId) => `/api/books/${bookId}/assets/${encodeURIComponent(assetId)}`,
     () => {},
   );
+  loaded.libraryBookId = bookId;
   loaded.sourceEpubUrl = `/api/books/${bookId}/source`;
   return loaded;
 }
@@ -205,12 +219,23 @@ export async function importEpubFile(file: File, resolution?: DuplicateResolutio
   if (response.outcome !== "imported" || typeof response.bookId !== "string") {
     throw new Error("本地服务没有返回书籍编号。");
   }
-  const loaded = await loadBookFromApi(response.bookId);
   return {
     outcome: "imported",
-    loaded,
+    bookId: response.bookId,
     ...(typeof response.warning === "string" ? { warning: response.warning } : {}),
   };
+}
+
+export async function saveReadingPosition(bookId: string, position: ReadingPosition | null): Promise<ReadingState> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
+  const value = await responseJson(await fetch(`/api/books/${bookId}/reading-state`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ position }),
+  }));
+  const state = parseReadingState(value);
+  if (!state) throw new Error("阅读进度服务返回了无效状态。");
+  return state;
 }
 
 export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBook> {
@@ -257,6 +282,7 @@ export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBo
     book,
     documents,
     report,
+    EMPTY_READING_STATE,
     sourceLabel,
     (assetId) => assetUrlById.get(assetId) as string,
     () => {
@@ -267,7 +293,17 @@ export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBo
 
 export function hasAssistedRuby(book: LoadedBook): boolean {
   const visit = (nodes: InlineNode[]): boolean => nodes.some((node) => {
-    if (node.type === "ruby") return node.origin !== "source";
+    if (node.type === "ruby") return node.readingType === "kana" && node.origin !== "source";
+    if (node.type === "emphasis" || node.type === "link") return visit(node.children);
+    return false;
+  });
+  return book.documents.some((document) => document.blocks.some((block) =>
+    block.type === "text" && block.variants.some((variant) => visit(variant.content))));
+}
+
+export function hasKatakanaRomaji(book: LoadedBook): boolean {
+  const visit = (nodes: InlineNode[]): boolean => nodes.some((node) => {
+    if (node.type === "ruby") return node.readingType === "romaji";
     if (node.type === "emphasis" || node.type === "link") return visit(node.children);
     return false;
   });

@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_READER_SETTINGS } from "./src/reader-settings.js";
 import { readReaderSettings, writeReaderSettings } from "./settings-store.js";
 
 const directories: string[] = [];
@@ -15,32 +16,32 @@ describe("reader settings store", () => {
     const directory = await mkdtemp(join(tmpdir(), "airnobe-settings-"));
     directories.push(directory);
     const settingsPath = join(directory, "user.json");
-    await expect(readReaderSettings(settingsPath)).resolves.toEqual({
-      version: 1,
-      navigation: { backwardTextSteps: 2, forwardTextSteps: 2 },
-      pageTransitions: false,
-    });
+    await expect(readReaderSettings(settingsPath)).resolves.toEqual(DEFAULT_READER_SETTINGS);
     await writeFile(settingsPath, "not-json", "utf8");
-    await expect(readReaderSettings(settingsPath)).resolves.toEqual({
-      version: 1,
-      navigation: { backwardTextSteps: 2, forwardTextSteps: 2 },
-      pageTransitions: false,
-    });
+    await expect(readReaderSettings(settingsPath)).resolves.toEqual(DEFAULT_READER_SETTINGS);
   });
 
-  it("writes a complete valid user.json", async () => {
+  it("migrates v1 while preserving page transitions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "airnobe-settings-"));
+    directories.push(directory);
+    const settingsPath = join(directory, "user.json");
+    await writeFile(settingsPath, JSON.stringify({
+      version: 1,
+      navigation: { backwardTextSteps: 4, forwardTextSteps: 7 },
+      pageTransitions: true,
+    }), "utf8");
+    await expect(readReaderSettings(settingsPath)).resolves.toEqual({ ...DEFAULT_READER_SETTINGS, pageTransitions: true });
+  });
+
+  it("writes a complete valid v4 user.json", async () => {
     const directory = await mkdtemp(join(tmpdir(), "airnobe-settings-"));
     directories.push(directory);
     const settingsPath = join(directory, "nested", "user.json");
-    await writeReaderSettings(settingsPath, {
-      version: 1,
-      navigation: { backwardTextSteps: 4, forwardTextSteps: 7 },
-      pageTransitions: true,
-    });
-    expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
-      version: 1,
-      navigation: { backwardTextSteps: 4, forwardTextSteps: 7 },
-      pageTransitions: true,
-    });
+    const settings = structuredClone(DEFAULT_READER_SETTINGS);
+    settings.navigation.textSteps = 4;
+    settings.shortcuts.topBackward = { code: "ArrowUp", modifier: "Control" };
+    settings.pageTransitions = true;
+    await writeReaderSettings(settingsPath, settings);
+    expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual(settings);
   });
 });

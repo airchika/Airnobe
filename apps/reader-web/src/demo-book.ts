@@ -1,5 +1,6 @@
 import type { BookDocument, BookManifest, ConversionReport } from "@airnobe/book-format";
 import type { LoadedBook } from "./book-source.js";
+import { EMPTY_READING_STATE } from "./reading-state.js";
 
 const document: BookDocument = {
   id: "document-demo",
@@ -39,7 +40,7 @@ const document: BookDocument = {
           order: 0,
           content: [
             { type: "text", value: "雨が上がると、" },
-            { type: "ruby", origin: "source", segments: [{ base: "街", reading: "まち" }] },
+            { type: "ruby", origin: "source", readingType: "kana", segments: [{ base: "街", reading: "まち" }] },
             { type: "text", value: "は静かになった。" },
           ],
           sourceRef: { sourcePath: "Text/demo.xhtml", nodeIndex: 2 },
@@ -64,10 +65,11 @@ const document: BookDocument = {
           order: 0,
           content: [
             { type: "text", value: "彼女は" },
-            { type: "ruby", origin: "reused", segments: [{ base: "扉", reading: "とびら" }] },
+            { type: "ruby", origin: "reused", readingType: "kana", segments: [{ base: "扉", reading: "とびら" }] },
             { type: "text", value: "と" },
-            { type: "ruby", origin: "generated", segments: [{ base: "窓", reading: "まど" }] },
+            { type: "ruby", origin: "generated", readingType: "kana", segments: [{ base: "窓", reading: "まど" }] },
             { type: "text", value: "を開け、" },
+            { type: "ruby", origin: "generated", readingType: "romaji", segments: [{ base: "コンピューター", reading: "konpyūtā" }] },
             { type: "emphasis", style: "sesame", children: [{ type: "text", value: "新しい風" }] },
             { type: "text", value: "を待った。" },
           ],
@@ -113,7 +115,7 @@ const document: BookDocument = {
 
 const book: BookManifest = {
   format: "airnobe-book",
-  version: 2,
+  version: 3,
   id: "book-demo",
   source: {
     fileName: "demo.epub",
@@ -135,6 +137,12 @@ const book: BookManifest = {
     engine: "demo",
     engineVersion: "1",
     dictionary: "demo",
+    romanization: {
+      engine: "demo",
+      engineVersion: "1",
+      system: "modified-hepburn",
+      longVowels: "macron",
+    },
   },
 };
 
@@ -150,6 +158,7 @@ const report: ConversionReport = {
     sourceRubyCount: 1,
     reusedRubyCount: 1,
     generatedRubyCount: 1,
+    katakanaRomajiCount: 1,
     assetCount: 0,
     unclassifiedTextCount: 0,
   },
@@ -163,6 +172,7 @@ export function createDemoBook(): LoadedBook {
     documentById: new Map([[document.id, document]]),
     assetUrlById: new Map(),
     report,
+    readingState: structuredClone(EMPTY_READING_STATE),
     sourceLabel: "内置演示",
     dispose() {},
   };

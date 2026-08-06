@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadBookFromFiles } from "./book-source.js";
+import { loadBookFromFiles, saveReadingPosition } from "./book-source.js";
 import { createDemoBook } from "./demo-book.js";
 
 function directoryFile(relativePath: string, contents: string, type = "application/json"): File {
@@ -21,8 +21,28 @@ describe("loadBookFromFiles", () => {
     expect(loaded.book.metadata.title).toBe("Airnobe 阅读演示");
     expect(loaded.documents).toHaveLength(1);
     expect(loaded.sourceLabel).toBe("selected-book");
+    expect(loaded.readingState.position).toBeNull();
     loaded.dispose();
     expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it("saves a validated reading position for a library book", async () => {
+    const bookId = "01234567-89ab-4cde-8fab-0123456789ab";
+    const position = {
+      documentId: "document-1",
+      blockId: "block-2",
+      viewportOffset: 24,
+      progress: 0.5,
+      chapterLabel: "第二章",
+    };
+    const state = { version: 1, position, updatedAt: "2026-08-06T00:00:00.000Z" } as const;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(state)));
+    await expect(saveReadingPosition(bookId, position)).resolves.toEqual(state);
+    expect(fetch).toHaveBeenCalledWith(`/api/books/${bookId}/reading-state`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ position }),
+    });
   });
 
   it("rejects a selection without book.json", async () => {

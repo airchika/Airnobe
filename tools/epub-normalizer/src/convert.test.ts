@@ -37,7 +37,7 @@ describe("EPUB normalizer", () => {
     expect(result.report.metrics.parallelBlockCount).toBe(1);
     expect(result.report.metrics.sourceRubyCount).toBe(1);
     const ruby = parallel.variants[0]?.content.find((node) => node.type === "ruby");
-    expect(ruby).toEqual({ type: "ruby", origin: "source", segments: [{ base: "帰", reading: "き" }, { base: "還", reading: "かん" }] });
+    expect(ruby).toEqual({ type: "ruby", origin: "source", readingType: "kana", segments: [{ base: "帰", reading: "き" }, { base: "還", reading: "かん" }] });
     expect(result.book.assets).toHaveLength(1);
   });
 
@@ -49,7 +49,7 @@ describe("EPUB normalizer", () => {
     const rubies = result.documents.flatMap((document) => document.blocks.flatMap((block) => block.type === "text"
       ? block.variants.flatMap((variant) => variant.content.filter((node) => node.type === "ruby"))
       : []));
-    expect(rubies[0]).toEqual({ type: "ruby", origin: "source", segments: [{ base: "帰", reading: "き" }, { base: "還", reading: "かん" }] });
+    expect(rubies[0]).toEqual({ type: "ruby", origin: "source", readingType: "kana", segments: [{ base: "帰", reading: "き" }, { base: "還", reading: "かん" }] });
   });
 
   it("infers jp-zh and retains multiple ordered translations", async () => {

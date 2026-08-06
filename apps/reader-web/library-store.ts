@@ -31,6 +31,11 @@ export interface LibraryIndex {
   books: LibraryEntry[];
 }
 
+export interface LibraryEntryPatch {
+  collectionStatus?: CollectionStatus;
+  note?: string;
+}
+
 export function emptyLibraryIndex(): LibraryIndex {
   return { version: LIBRARY_INDEX_VERSION, books: [] };
 }
@@ -138,6 +143,29 @@ export function findProbableDuplicates(index: LibraryIndex, inspected: Inspected
       && entryAuthors === authors;
     return Boolean(identifierMatch || metadataMatch);
   });
+}
+
+export function updateLibraryEntry(
+  index: LibraryIndex,
+  bookId: string,
+  patch: LibraryEntryPatch,
+  now = new Date().toISOString(),
+): { index: LibraryIndex; entry: LibraryEntry } | undefined {
+  const current = index.books.find((entry) => entry.id === bookId);
+  if (!current) return undefined;
+  const entry: LibraryEntry = {
+    ...current,
+    ...(patch.collectionStatus ? { collectionStatus: patch.collectionStatus } : {}),
+    ...(patch.note !== undefined ? { note: patch.note } : {}),
+    updatedAt: now,
+  };
+  return {
+    index: {
+      version: index.version,
+      books: index.books.map((candidate) => candidate.id === bookId ? entry : candidate),
+    },
+    entry,
+  };
 }
 
 export function contentKindFor(book: BookManifest): ContentKind {

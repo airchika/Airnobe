@@ -16,11 +16,13 @@ import { annotateDocuments, type TokenizerLike } from "./annotate.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("kuromoji/package.json") as { version: string };
+const wanakanaPackageJson = require("wanakana/package.json") as { version: string };
 export const KUROMOJI_VERSION = packageJson.version;
+export const WANAKANA_VERSION = wanakanaPackageJson.version;
 export const DICTIONARY_ID = "mecab-ipadic-2.7.0-20070801-bundled";
 
 function derivedBookId(baseBookId: string): string {
-  return `book-${createHash("sha256").update(`${baseBookId}:furigana:kuromoji:${KUROMOJI_VERSION}:${DICTIONARY_ID}`).digest("hex").slice(0, 16)}`;
+  return `book-${createHash("sha256").update(`${baseBookId}:furigana:kuromoji:${KUROMOJI_VERSION}:${DICTIONARY_ID}:wanakana:${WANAKANA_VERSION}:modified-hepburn-macron`).digest("hex").slice(0, 16)}`;
 }
 
 export async function loadTokenizer(): Promise<TokenizerLike> {
@@ -63,9 +65,16 @@ export function deriveFurigana(base: ConversionResult, tokenizer: TokenizerLike)
     engine: "kuromoji",
     engineVersion: KUROMOJI_VERSION,
     dictionary: DICTIONARY_ID,
+    romanization: {
+      engine: "wanakana",
+      engineVersion: WANAKANA_VERSION,
+      system: "modified-hepburn",
+      longVowels: "macron",
+    },
   };
   report.metrics.generatedRubyCount = stats.generatedRubyCount;
   report.metrics.reusedRubyCount = stats.reusedRubyCount;
+  report.metrics.katakanaRomajiCount = stats.katakanaRomajiCount;
   if (stats.skippedLowConfidenceCount > 0) {
     report.warnings.push({
       code: "FURIGANA_LOW_CONFIDENCE_SKIPPED",

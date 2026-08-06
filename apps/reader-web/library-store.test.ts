@@ -9,6 +9,7 @@ import {
   findExactDuplicate,
   findProbableDuplicates,
   readLibraryIndex,
+  updateLibraryEntry,
   writeLibraryIndexAtomically,
 } from "./library-store.js";
 
@@ -91,5 +92,23 @@ describe("library store", () => {
     expect(replacement.note).toBe("保留备注");
     expect(replacement.addedAt).toBe(previous.addedAt);
     expect(replacement.updatedAt).not.toBe(previous.updatedAt);
+  });
+
+  it("updates only mutable library state and refreshes updatedAt", () => {
+    const original = entry();
+    const result = updateLibraryEntry(
+      { version: 1, books: [original] },
+      id,
+      { collectionStatus: "reading", note: "正在读" },
+      "2026-08-06T00:00:00.000Z",
+    );
+    expect(result?.entry).toEqual({
+      ...original,
+      collectionStatus: "reading",
+      note: "正在读",
+      updatedAt: "2026-08-06T00:00:00.000Z",
+    });
+    expect(result?.index.books).toEqual([result?.entry]);
+    expect(updateLibraryEntry({ version: 1, books: [original] }, crypto.randomUUID(), { note: "missing" })).toBeUndefined();
   });
 });

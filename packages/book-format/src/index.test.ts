@@ -8,6 +8,7 @@ describe("book format", () => {
       {
         type: "ruby",
         origin: "source",
+        readingType: "kana",
         segments: [{ base: "学校", reading: "がっこう" }],
       },
       { type: "lineBreak" },
@@ -22,8 +23,18 @@ describe("book format", () => {
       expect(InlineNodeSchema.parse({
         type: "ruby",
         origin,
+        readingType: "kana",
         segments: [{ base: "本", reading: "ほん" }],
       })).toMatchObject({ origin });
     }
+  });
+
+  it("distinguishes kana readings from katakana romaji", () => {
+    expect(InlineNodeSchema.parse({
+      type: "ruby",
+      origin: "generated",
+      readingType: "romaji",
+      segments: [{ base: "コンピューター", reading: "konpyūtā" }],
+    })).toMatchObject({ readingType: "romaji" });
   });
 });

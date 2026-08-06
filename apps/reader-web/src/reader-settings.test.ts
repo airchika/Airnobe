@@ -2,26 +2,101 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_READER_SETTINGS, parseReaderSettings } from "./reader-settings.js";
 
 describe("reader settings", () => {
-  it("uses two text blocks in each direction by default", () => {
+  it("uses one two-block navigation distance and eleven default shortcuts", () => {
     expect(DEFAULT_READER_SETTINGS).toEqual({
-      version: 1,
-      navigation: { backwardTextSteps: 2, forwardTextSteps: 2 },
+      version: 4,
+      navigation: { textSteps: 2 },
+      shortcuts: {
+        toggleJapanese: { code: "KeyQ" },
+        toggleAssistedRuby: { code: "KeyE" },
+        toggleKatakanaRomaji: { code: "KeyZ" },
+        topBackward: { code: "KeyR" },
+        topForward: { code: "KeyF" },
+        bottomBackward: { code: "KeyW" },
+        bottomForward: { code: "KeyS" },
+        pageUp: { code: "KeyA" },
+        pageDown: { code: "KeyD" },
+        toggleMenu: { code: "Digit1" },
+        toggleToc: { code: "Digit2" },
+      },
       pageTransitions: false,
     });
   });
 
-  it("accepts only versioned settings with 1–99 integer navigation counts", () => {
+  it("accepts valid v4 settings and optional single modifiers", () => {
+    const value = structuredClone(DEFAULT_READER_SETTINGS);
+    value.navigation.textSteps = 9;
+    value.shortcuts.topBackward = { code: "ArrowUp", modifier: "Control" };
+    value.pageTransitions = true;
+    expect(parseReaderSettings(value)).toEqual(value);
+  });
+
+  it("migrates v2 bindings and finds a free directory key without overwriting", () => {
+    const { toggleMenu: _toggleMenu, toggleToc: _toggleToc, ...legacyShortcuts } = DEFAULT_READER_SETTINGS.shortcuts;
+    legacyShortcuts.pageDown = { code: "Digit1" };
+    const migrated = parseReaderSettings({
+      version: 2,
+      navigation: { textSteps: 4 },
+      shortcuts: legacyShortcuts,
+      pageTransitions: true,
+    });
+    expect(migrated).toEqual({
+      version: 4,
+      navigation: { textSteps: 4 },
+      shortcuts: { ...legacyShortcuts, toggleMenu: { code: "Digit3" }, toggleToc: { code: "Digit2" } },
+      pageTransitions: true,
+    });
+  });
+
+  it("migrates the default v3 directory key to Digit2 and reserves Digit1 for the menu", () => {
+    const { toggleMenu: _toggleMenu, ...v3Shortcuts } = DEFAULT_READER_SETTINGS.shortcuts;
+    v3Shortcuts.toggleToc = { code: "Digit1" };
     expect(parseReaderSettings({
-      version: 1,
-      navigation: { backwardTextSteps: 3, forwardTextSteps: 9 },
-    })).toEqual({ version: 1, navigation: { backwardTextSteps: 3, forwardTextSteps: 9 }, pageTransitions: false });
+      version: 3,
+      navigation: { textSteps: 2 },
+      shortcuts: v3Shortcuts,
+      pageTransitions: false,
+    })).toEqual(DEFAULT_READER_SETTINGS);
+  });
+
+  it("preserves customized v3 bindings and finds a free menu key", () => {
+    const { toggleMenu: _toggleMenu, ...v3Shortcuts } = DEFAULT_READER_SETTINGS.shortcuts;
+    v3Shortcuts.pageDown = { code: "Digit1" };
+    v3Shortcuts.toggleToc = { code: "KeyT" };
+    const migrated = parseReaderSettings({
+      version: 3,
+      navigation: { textSteps: 5 },
+      shortcuts: v3Shortcuts,
+      pageTransitions: true,
+    });
+    expect(migrated?.shortcuts.pageDown).toEqual({ code: "Digit1" });
+    expect(migrated?.shortcuts.toggleToc).toEqual({ code: "KeyT" });
+    expect(migrated?.shortcuts.toggleMenu).toEqual({ code: "Digit2" });
+  });
+
+  it("migrates valid v1 settings with a reset two-block distance", () => {
     expect(parseReaderSettings({
       version: 1,
       navigation: { backwardTextSteps: 3, forwardTextSteps: 9 },
       pageTransitions: true,
-    })).toEqual({ version: 1, navigation: { backwardTextSteps: 3, forwardTextSteps: 9 }, pageTransitions: true });
-    expect(parseReaderSettings({ version: 1, navigation: { backwardTextSteps: 0, forwardTextSteps: 2 } })).toBeUndefined();
-    expect(parseReaderSettings({ version: 1, navigation: { backwardTextSteps: 2.5, forwardTextSteps: 2 } })).toBeUndefined();
-    expect(parseReaderSettings({ version: 2, navigation: { backwardTextSteps: 2, forwardTextSteps: 2 } })).toBeUndefined();
+    })).toEqual({ ...DEFAULT_READER_SETTINGS, pageTransitions: true });
+  });
+
+  it("rejects invalid counts, bindings, modifiers, and duplicate chords", () => {
+    const invalidCount = structuredClone(DEFAULT_READER_SETTINGS);
+    invalidCount.navigation.textSteps = 0;
+    expect(parseReaderSettings(invalidCount)).toBeUndefined();
+
+    const invalidCode = structuredClone(DEFAULT_READER_SETTINGS) as unknown as { shortcuts: { pageDown: { code: string } } };
+    invalidCode.shortcuts.pageDown.code = "F5";
+    expect(parseReaderSettings(invalidCode)).toBeUndefined();
+
+    const invalidModifier = structuredClone(DEFAULT_READER_SETTINGS) as unknown as { shortcuts: { pageDown: { code: string; modifier: string } } };
+    invalidModifier.shortcuts.pageDown.modifier = "Meta";
+    expect(parseReaderSettings(invalidModifier)).toBeUndefined();
+
+    const duplicate = structuredClone(DEFAULT_READER_SETTINGS);
+    duplicate.shortcuts.pageDown = { code: "KeyA" };
+    expect(parseReaderSettings(duplicate)).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import type { BookDocument, InlineNode } from "@airnobe/book-format";
+import { toHiragana, toRomaji } from "wanakana";
 
 export interface TokenLike {
   surface_form: string;
@@ -26,6 +27,7 @@ interface Range {
 interface Annotation extends Range {
   reading: string;
   origin: "reused" | "generated";
+  readingType: "kana" | "romaji";
 }
 
 interface FlatContent {
@@ -41,6 +43,7 @@ interface PositionedToken extends Range {
 export interface AnnotationStats {
   reusedRubyCount: number;
   generatedRubyCount: number;
+  katakanaRomajiCount: number;
   skippedLowConfidenceCount: number;
 }
 
@@ -105,6 +108,48 @@ function hasKanji(value: string): boolean {
   return /[\u3400-\u9fff\uf900-\ufaff々〆ヶ]/u.test(value);
 }
 
+function isKatakanaWord(value: string): boolean {
+  const normalized = value.normalize("NFKC");
+  return /[\u30a1-\u30fa\u30fd-\u30ff]/u.test(normalized)
+    && /^[\u30a1-\u30fa\u30fd-\u30ffー]+$/u.test(normalized);
+}
+
+const MACRONS: Record<string, string> = { a: "ā", e: "ē", i: "ī", o: "ō", u: "ū" };
+const FOREIGN_SOUND_ROMAJI: Record<string, string> = {
+  "いぇ": "ye",
+  "うぃ": "wi", "うぇ": "we", "うぉ": "wo",
+  "ゔぁ": "va", "ゔぃ": "vi", "ゔ": "vu", "ゔぇ": "ve", "ゔぉ": "vo",
+  "くぁ": "kwa", "くぃ": "kwi", "くぇ": "kwe", "くぉ": "kwo",
+  "ぐぁ": "gwa", "ぐぃ": "gwi", "ぐぇ": "gwe", "ぐぉ": "gwo",
+  "しぇ": "she", "じぇ": "je", "ちぇ": "che",
+  "すぃ": "si", "ずぃ": "zi",
+  "てぃ": "ti", "てゅ": "tyu", "でぃ": "di", "でゅ": "dyu",
+  "とぅ": "tu", "どぅ": "du",
+  "つぁ": "tsa", "つぃ": "tsi", "つぇ": "tse", "つぉ": "tso",
+  "ふぁ": "fa", "ふぃ": "fi", "ふぇ": "fe", "ふぉ": "fo", "ふゅ": "fyu",
+};
+
+function romajiSegment(value: string): string {
+  return toRomaji(toHiragana(value), { customRomajiMapping: FOREIGN_SOUND_ROMAJI });
+}
+
+function macronizeLastVowel(value: string): string {
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    const macron = MACRONS[value[index] ?? ""];
+    if (macron) return `${value.slice(0, index)}${macron}${value.slice(index + 1)}`;
+  }
+  return `${value}-`;
+}
+
+export function katakanaToRomaji(value: string): string {
+  const parts = value.normalize("NFKC").split("ー");
+  let result = romajiSegment(parts[0] ?? "");
+  for (let index = 1; index < parts.length; index += 1) {
+    result = macronizeLastVowel(result) + romajiSegment(parts[index] ?? "");
+  }
+  return result;
+}
+
 function katakanaToHiragana(value: string): string {
   return [...value].map((character) => {
     const code = character.codePointAt(0) ?? 0;
@@ -120,7 +165,17 @@ function annotationNodes(
   surface: string,
   rawReading: string,
   origin: "reused" | "generated",
+  readingType: "kana" | "romaji",
 ): InlineNode[] {
+  if (readingType === "romaji") {
+    if (!rawReading) return [{ type: "text", value: surface }];
+    return [{
+      type: "ruby",
+      segments: [{ base: surface, reading: rawReading }],
+      origin,
+      readingType,
+    }];
+  }
   const reading = katakanaToHiragana(rawReading);
   let prefixLength = 0;
   while (
@@ -146,7 +201,7 @@ function annotationNodes(
   const prefix = surface.slice(0, prefixLength);
   const suffix = suffixLength ? surface.slice(surface.length - suffixLength) : "";
   if (prefix) nodes.push({ type: "text", value: prefix });
-  nodes.push({ type: "ruby", segments: [{ base: surfaceCore, reading: readingCore }], origin });
+  nodes.push({ type: "ruby", segments: [{ base: surfaceCore, reading: readingCore }], origin, readingType });
   if (suffix) nodes.push({ type: "text", value: suffix });
   return nodes;
 }
@@ -160,7 +215,7 @@ function transformNodes(nodes: InlineNode[], annotationsByLeaf: Map<InlineNode, 
       for (const annotation of annotations) {
         if (annotation.start > cursor) output.push({ type: "text", value: node.value.slice(cursor, annotation.start) });
         const surface = node.value.slice(annotation.start, annotation.end);
-        output.push(...annotationNodes(surface, annotation.reading, annotation.origin));
+        output.push(...annotationNodes(surface, annotation.reading, annotation.origin, annotation.readingType));
         cursor = annotation.end;
       }
       if (cursor < node.value.length) output.push({ type: "text", value: node.value.slice(cursor) });
@@ -206,9 +261,10 @@ function sourceReadingMap(documents: BookDocument[]): Map<string, string> {
 
 export function annotateDocuments(documents: BookDocument[], tokenizer: TokenizerLike): AnnotationStats {
   const reusable = sourceReadingMap(documents);
-  const reusableBases = [...reusable.keys()].sort((left, right) => right.length - left.length);
+  const reusableBases = [...reusable.keys()].filter(hasKanji).sort((left, right) => right.length - left.length);
   let reusedRubyCount = 0;
   let generatedRubyCount = 0;
+  let katakanaRomajiCount = 0;
   let skippedLowConfidenceCount = 0;
   for (const document of documents) {
     for (const block of document.blocks) {
@@ -234,9 +290,24 @@ export function annotateDocuments(documents: BookDocument[], tokenizer: Tokenize
             if (end !== current.start + base.length) continue;
             const range = { start: current.start, end };
             if (overlaps(range, flat.protectedRanges) || !containingLeaf(range, flat.leaves)) continue;
-            selected = { ...range, reading: reusable.get(base) as string, origin: "reused" };
+            selected = { ...range, reading: reusable.get(base) as string, origin: "reused", readingType: "kana" };
             consumedTokens = cursor - index + 1;
             break;
+          }
+          if (!selected) {
+            if (isKatakanaWord(current.token.surface_form)) {
+              if (!containingLeaf(current, flat.leaves)) continue;
+              const reading = katakanaToRomaji(current.token.surface_form);
+              if (reading) {
+                selected = {
+                  start: current.start,
+                  end: current.end,
+                  reading,
+                  origin: "generated",
+                  readingType: "romaji",
+                };
+              }
+            }
           }
           if (!selected) {
             if (!hasKanji(current.token.surface_form) || !current.token.reading) continue;
@@ -250,6 +321,7 @@ export function annotateDocuments(documents: BookDocument[], tokenizer: Tokenize
               end: current.end,
               reading: current.token.reading,
               origin: "generated",
+              readingType: "kana",
             };
           }
           const leaf = containingLeaf(selected, flat.leaves);
@@ -259,11 +331,13 @@ export function annotateDocuments(documents: BookDocument[], tokenizer: Tokenize
             end: selected.end - leaf.start,
             reading: selected.reading,
             origin: selected.origin,
+            readingType: selected.readingType,
           };
           const list = annotationsByLeaf.get(leaf.node) ?? [];
           list.push(local);
           annotationsByLeaf.set(leaf.node, list);
-          if (selected.origin === "reused") reusedRubyCount += 1;
+          if (selected.readingType === "romaji") katakanaRomajiCount += 1;
+          else if (selected.origin === "reused") reusedRubyCount += 1;
           else generatedRubyCount += 1;
           index += consumedTokens - 1;
         }
@@ -272,5 +346,5 @@ export function annotateDocuments(documents: BookDocument[], tokenizer: Tokenize
       }
     }
   }
-  return { reusedRubyCount, generatedRubyCount, skippedLowConfidenceCount };
+  return { reusedRubyCount, generatedRubyCount, katakanaRomajiCount, skippedLowConfidenceCount };
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const AIRNOBE_FORMAT = "airnobe-book" as const;
-export const AIRNOBE_FORMAT_VERSION = 2 as const;
+export const AIRNOBE_FORMAT_VERSION = 3 as const;
 
 function isPortableRelativePath(value: string): boolean {
   return !value.includes("\\")
@@ -41,6 +41,7 @@ export type InlineNode =
       type: "ruby";
       segments: Array<{ base: string; reading: string }>;
       origin: "source" | "reused" | "generated";
+      readingType: "kana" | "romaji";
     }
   | {
       type: "emphasis";
@@ -61,6 +62,7 @@ export const InlineNodeSchema: z.ZodType<InlineNode> = z.lazy(() =>
         reading: z.string().min(1),
       }).strict()).min(1),
       origin: z.enum(["source", "reused", "generated"]),
+      readingType: z.enum(["kana", "romaji"]),
     }).strict(),
     z.object({
       type: z.literal("emphasis"),
@@ -202,6 +204,12 @@ export const BookManifestSchema = z.object({
     engine: z.string().min(1),
     engineVersion: z.string().min(1),
     dictionary: z.string().min(1),
+    romanization: z.object({
+      engine: z.string().min(1),
+      engineVersion: z.string().min(1),
+      system: z.literal("modified-hepburn"),
+      longVowels: z.literal("macron"),
+    }).strict(),
   }).strict().optional(),
 }).strict();
 export type BookManifest = z.infer<typeof BookManifestSchema>;
@@ -232,6 +240,7 @@ export const ConversionReportSchema = z.object({
     sourceRubyCount: z.number().int().nonnegative(),
     reusedRubyCount: z.number().int().nonnegative(),
     generatedRubyCount: z.number().int().nonnegative(),
+    katakanaRomajiCount: z.number().int().nonnegative(),
     assetCount: z.number().int().nonnegative(),
     unclassifiedTextCount: z.number().int().nonnegative(),
   }).strict(),

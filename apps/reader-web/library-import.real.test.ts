@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -37,6 +37,19 @@ describe.skipIf(!runReal)("real EPUB library import", () => {
       bytes: chineseBytes,
       fileName: "zjws.epub",
     })).rejects.toThrow(/已存在/);
+    await writeFile(
+      join(directory, "zh", "books", chinese.entry.id, "reading-state.json"),
+      JSON.stringify({ version: 1, position: null, updatedAt: null }),
+      "utf8",
+    );
+    const rebuiltChinese = await importLibraryBook({
+      libraryDirectory: join(directory, "zh"),
+      bytes: chineseBytes,
+      fileName: "zjws.epub",
+      replaceBookId: chinese.entry.id,
+    });
+    expect(rebuiltChinese.entry.id).toBe(chinese.entry.id);
+    expect(await readdir(join(directory, "zh", "books", chinese.entry.id))).not.toContain("reading-state.json");
     expect((await readLibraryIndex(join(directory, "zh", "library.json"))).books).toHaveLength(1);
     await expect(importLibraryBook({
       libraryDirectory: join(directory, "zh"),
@@ -56,6 +69,16 @@ describe.skipIf(!runReal)("real EPUB library import", () => {
     expect(japanese.entry.annotationStatus).toBe("ready");
     expect(japaneseFiles).toContain("source.epub");
     expect(japaneseFiles).toContain("base.snapshot.json.gz");
+    const derivedBook = JSON.parse(await readFile(join(japaneseDirectory, "book.json"), "utf8")) as {
+      version: number;
+      derivation?: { romanization?: { system?: string; longVowels?: string } };
+    };
+    const derivedReport = JSON.parse(await readFile(join(japaneseDirectory, "report.json"), "utf8")) as {
+      metrics: { katakanaRomajiCount: number };
+    };
+    expect(derivedBook.version).toBe(3);
+    expect(derivedBook.derivation?.romanization).toMatchObject({ system: "modified-hepburn", longVowels: "macron" });
+    expect(derivedReport.metrics.katakanaRomajiCount).toBeGreaterThan(0);
     const snapshot = parseBaseSnapshot(await readFile(join(japaneseDirectory, "base.snapshot.json.gz")));
     expect(snapshot.book.derivation).toBeUndefined();
     expect(snapshot.documents.length).toBeGreaterThan(0);
@@ -73,5 +96,23 @@ describe.skipIf(!runReal)("real EPUB library import", () => {
       warnings: Array<{ code: string }>;
     };
     expect(failedReport.warnings.some((warning) => warning.code === "FURIGANA_DERIVATION_FAILED")).toBe(true);
+  }, 120_000);
+
+  it.each(["kagejitsu.epub", "mimozanoGaoBai.epub"])("imports %s without empty romaji readings", async (fileName) => {
+    const sourcePath = join(repositoryDirectory, fileName);
+    await access(sourcePath);
+    const directory = await mkdtemp(join(tmpdir(), "airnobe-library-romaji-real-"));
+    temporaryDirectories.push(directory);
+    const imported = await importLibraryBook({
+      libraryDirectory: directory,
+      bytes: await readFile(sourcePath),
+      fileName,
+    });
+    const bookDirectory = join(directory, "books", imported.entry.id);
+    const report = JSON.parse(await readFile(join(bookDirectory, "report.json"), "utf8")) as {
+      metrics: { katakanaRomajiCount: number };
+    };
+    expect(imported.entry.annotationStatus).toBe("ready");
+    expect(report.metrics.katakanaRomajiCount).toBeGreaterThan(0);
   }, 120_000);
 });
