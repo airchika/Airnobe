@@ -1,306 +1,143 @@
-import { DEFAULT_THEME_ID, isThemeId } from "./themes.js";
+import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, isThemeId } from "./themes.js";
 
-const V2_SHORTCUT_ACTIONS = [
-  "toggleJapanese",
-  "toggleAssistedRuby",
-  "toggleKatakanaRomaji",
-  "topBackward",
-  "topForward",
-  "bottomBackward",
-  "bottomForward",
-  "pageUp",
-  "pageDown",
-] as const;
-
-export const SHORTCUT_ACTIONS = [
-  ...V2_SHORTCUT_ACTIONS,
-  "toggleMenu",
-  "toggleToc",
-] as const;
-
-const V3_SHORTCUT_ACTIONS = [
-  ...V2_SHORTCUT_ACTIONS,
-  "toggleToc",
-] as const;
-
+const READING_ACTIONS = ["toggleJapanese", "toggleAssistedRuby", "toggleKatakanaRomaji", "topBackward", "topForward", "bottomBackward", "bottomForward", "pageUp", "pageDown"] as const;
+const OLD_ACTIONS = [...READING_ACTIONS, "toggleMenu", "toggleToc"] as const;
+export const SHORTCUT_ACTIONS = [...READING_ACTIONS, "toggleSidebar", "returnLibrary"] as const;
 export type ShortcutAction = typeof SHORTCUT_ACTIONS[number];
+type OldShortcutAction = typeof OLD_ACTIONS[number];
 export type ShortcutModifier = "Control" | "Alt" | "Shift";
+export interface ShortcutBinding { code: string; modifier?: ShortcutModifier }
+export type ThemeMode = "day" | "night" | "system";
 
-export interface ShortcutBinding {
-  code: string;
-  modifier?: ShortcutModifier;
+export interface ReaderAppearance {
+  theme: { mode: ThemeMode; lightThemeId: string; darkThemeId: string };
+  typography: { fontSize: number; fontWeight: 400 | 600; lineHeight: number; paragraphSpacing: number; columnWidth: number; japaneseOpacity: number; rubyScale: number };
+  display: { showJapanese: boolean; showAssistedRuby: boolean; showKatakanaRomaji: boolean; showJapaneseRule: boolean; showProgressBars: boolean };
 }
-
 export interface ReaderSettings {
-  version: 6;
-  navigation: {
-    textSteps: number;
-  };
+  version: 8;
+  navigation: { textSteps: number };
   shortcuts: Record<ShortcutAction, ShortcutBinding>;
   pageTransitions: boolean;
   appearance: ReaderAppearance;
 }
 
-export interface ReaderAppearance {
-  themeId: string;
-  typography: {
-    fontSize: number;
-    fontWeight: 400 | 600;
-    lineHeight: number;
-    paragraphSpacing: number;
-    columnWidth: number;
-    japaneseOpacity: number;
-  };
-  defaults: {
-    showJapanese: boolean;
-    showAssistedRuby: boolean;
-    showKatakanaRomaji: boolean;
-  };
-}
-
 export const DEFAULT_READER_APPEARANCE: ReaderAppearance = {
-  themeId: DEFAULT_THEME_ID,
-  typography: { fontSize: 19, fontWeight: 400, lineHeight: 1.6, paragraphSpacing: 1, columnWidth: 760, japaneseOpacity: 0.6 },
-  defaults: { showJapanese: false, showAssistedRuby: false, showKatakanaRomaji: false },
+  theme: { mode: "night", lightThemeId: DEFAULT_LIGHT_THEME_ID, darkThemeId: DEFAULT_DARK_THEME_ID },
+  typography: { fontSize: 19, fontWeight: 400, lineHeight: 1.6, paragraphSpacing: 1, columnWidth: 760, japaneseOpacity: 0.6, rubyScale: 0.6 },
+  display: { showJapanese: false, showAssistedRuby: false, showKatakanaRomaji: false, showJapaneseRule: true, showProgressBars: true },
 };
-
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
-  toggleJapanese: { code: "KeyQ" },
-  toggleAssistedRuby: { code: "KeyE" },
-  toggleKatakanaRomaji: { code: "KeyZ" },
-  topBackward: { code: "KeyR" },
-  topForward: { code: "KeyF" },
-  bottomBackward: { code: "KeyW" },
-  bottomForward: { code: "KeyS" },
-  pageUp: { code: "KeyA" },
-  pageDown: { code: "KeyD" },
-  toggleMenu: { code: "Digit1" },
-  toggleToc: { code: "Digit2" },
+  toggleJapanese: { code: "KeyQ" }, toggleAssistedRuby: { code: "KeyE" }, toggleKatakanaRomaji: { code: "KeyZ" },
+  topBackward: { code: "KeyR" }, topForward: { code: "KeyF" }, bottomBackward: { code: "KeyW" }, bottomForward: { code: "KeyS" },
+  pageUp: { code: "KeyA" }, pageDown: { code: "KeyD" }, toggleSidebar: { code: "Digit1" }, returnLibrary: { code: "Digit2" },
 };
+export const DEFAULT_READER_SETTINGS: ReaderSettings = { version: 8, navigation: { textSteps: 2 }, shortcuts: cloneShortcuts(DEFAULT_SHORTCUTS), pageTransitions: false, appearance: structuredClone(DEFAULT_READER_APPEARANCE) };
 
-export const DEFAULT_READER_SETTINGS: ReaderSettings = {
-  version: 6,
-  navigation: {
-    textSteps: 2,
-  },
-  shortcuts: cloneShortcuts(DEFAULT_SHORTCUTS),
-  pageTransitions: false,
-  appearance: structuredClone(DEFAULT_READER_APPEARANCE),
-};
-
-export function isNavigationStepCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 99;
-}
-
-export function isShortcutCode(value: unknown): value is string {
-  return typeof value === "string" && /^(Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Home|End|PageUp|PageDown|Space)$/.test(value);
-}
-
-export function shortcutBindingId(binding: ShortcutBinding): string {
-  return `${binding.modifier ?? "None"}+${binding.code}`;
-}
-
-function finiteRange(value: unknown, minimum: number, maximum: number): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
-}
-
-function parseAppearance(value: unknown, legacyV5 = false): ReaderAppearance | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const record = value as Record<string, unknown>;
-  const typography = typeof record.typography === "object" && record.typography !== null
-    ? record.typography as Record<string, unknown>
-    : undefined;
-  const defaults = typeof record.defaults === "object" && record.defaults !== null
-    ? record.defaults as Record<string, unknown>
-    : undefined;
-  if (!isThemeId(record.themeId) || !typography || !defaults) return undefined;
-  if (!Number.isInteger(typography.fontSize) || !finiteRange(typography.fontSize, 14, 30)) return undefined;
-  if (typography.fontWeight !== 400 && typography.fontWeight !== 600) return undefined;
-  if (!finiteRange(typography.lineHeight, legacyV5 ? 1.75 : 1.4, legacyV5 ? 2.6 : 2.2)) return undefined;
-  if (!legacyV5 && !finiteRange(typography.paragraphSpacing, 0, 2)) return undefined;
-  if (!Number.isInteger(typography.columnWidth) || !finiteRange(typography.columnWidth, 520, 1200)) return undefined;
-  if (!finiteRange(typography.japaneseOpacity, 0.2, 1)) return undefined;
-  if (typeof defaults.showJapanese !== "boolean" || typeof defaults.showAssistedRuby !== "boolean" || typeof defaults.showKatakanaRomaji !== "boolean") return undefined;
-  return {
-    themeId: record.themeId,
-    typography: {
-      fontSize: typography.fontSize,
-      fontWeight: typography.fontWeight,
-      lineHeight: legacyV5
-        ? typography.lineHeight === 2.05 ? 1.6 : Math.min(2.2, Math.max(1.4, typography.lineHeight))
-        : typography.lineHeight,
-      paragraphSpacing: legacyV5 ? 1 : typography.paragraphSpacing as number,
-      columnWidth: typography.columnWidth,
-      japaneseOpacity: typography.japaneseOpacity,
-    },
-    defaults: {
-      showJapanese: defaults.showJapanese,
-      showAssistedRuby: defaults.showAssistedRuby,
-      showKatakanaRomaji: defaults.showKatakanaRomaji,
-    },
-  };
-}
+export function isNavigationStepCount(value: unknown): value is number { return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 99; }
+export function isShortcutCode(value: unknown): value is string { return typeof value === "string" && /^(Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Home|End|PageUp|PageDown|Space)$/.test(value); }
+export function shortcutBindingId(binding: ShortcutBinding): string { return `${binding.modifier ?? "None"}+${binding.code}`; }
+function finiteRange(value: unknown, minimum: number, maximum: number): value is number { return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum; }
 
 export function parseReaderAppearance(value: unknown): ReaderAppearance | undefined {
-  return parseAppearance(value);
-}
-
-function parseShortcutBinding(value: unknown): ShortcutBinding | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
-  if (!isShortcutCode(record.code)) return undefined;
-  const modifier = record.modifier;
-  if (modifier !== undefined && modifier !== "Control" && modifier !== "Alt" && modifier !== "Shift") return undefined;
-  return modifier === undefined ? { code: record.code } : { code: record.code, modifier };
+  const theme = record.theme as Record<string, unknown> | undefined;
+  const typography = record.typography as Record<string, unknown> | undefined;
+  const display = record.display as Record<string, unknown> | undefined;
+  if (!theme || !typography || !display) return undefined;
+  if (!["day", "night", "system"].includes(String(theme.mode)) || !isThemeId(theme.lightThemeId) || !isThemeId(theme.darkThemeId)) return undefined;
+  if (!Number.isInteger(typography.fontSize) || !finiteRange(typography.fontSize, 14, 30) || (typography.fontWeight !== 400 && typography.fontWeight !== 600)) return undefined;
+  if (!finiteRange(typography.lineHeight, 1.4, 2.2) || !finiteRange(typography.paragraphSpacing, 0, 2) || !Number.isInteger(typography.columnWidth) || !finiteRange(typography.columnWidth, 520, 1200) || !finiteRange(typography.japaneseOpacity, 0.2, 1) || !finiteRange(typography.rubyScale, 0.45, 0.8)) return undefined;
+  const displayKeys = ["showJapanese", "showAssistedRuby", "showKatakanaRomaji", "showJapaneseRule", "showProgressBars"] as const;
+  if (displayKeys.some((key) => typeof display[key] !== "boolean")) return undefined;
+  return { theme: { mode: theme.mode as ThemeMode, lightThemeId: theme.lightThemeId, darkThemeId: theme.darkThemeId }, typography: typography as ReaderAppearance["typography"], display: display as ReaderAppearance["display"] };
 }
 
-function parseShortcutsForActions<Action extends ShortcutAction>(
-  value: unknown,
-  actions: readonly Action[],
-): Record<Action, ShortcutBinding> | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+function legacyAppearance(value: unknown, version: number): ReaderAppearance | undefined {
+  if (!value || typeof value !== "object") return version <= 4 ? structuredClone(DEFAULT_READER_APPEARANCE) : undefined;
   const record = value as Record<string, unknown>;
-  const entries = actions.map((action) => {
-    const binding = parseShortcutBinding(record[action]);
-    return binding ? [action, binding] as const : undefined;
-  });
-  if (entries.some((entry) => entry === undefined)) return undefined;
-  const shortcuts = Object.fromEntries(entries as Array<readonly [Action, ShortcutBinding]>) as Record<Action, ShortcutBinding>;
-  const ids = actions.map((action) => shortcutBindingId(shortcuts[action]));
-  return new Set(ids).size === ids.length ? shortcuts : undefined;
+  const typography = record.typography as Record<string, unknown> | undefined;
+  const defaults = record.defaults as Record<string, unknown> | undefined;
+  if (!typography || !defaults || !isThemeId(record.themeId)) return undefined;
+  const legacyV5 = version === 5;
+  const lineHeight = legacyV5 && typography.lineHeight === 2.05 ? 1.6 : Math.min(2.2, Math.max(1.4, Number(typography.lineHeight)));
+  const next = structuredClone(DEFAULT_READER_APPEARANCE);
+  next.theme.darkThemeId = record.themeId;
+  if (record.themeId === DEFAULT_LIGHT_THEME_ID) { next.theme.lightThemeId = record.themeId; next.theme.mode = "day"; }
+  next.typography = { fontSize: Number(typography.fontSize), fontWeight: typography.fontWeight as 400 | 600, lineHeight, paragraphSpacing: legacyV5 ? 1 : Number(typography.paragraphSpacing), columnWidth: Number(typography.columnWidth), japaneseOpacity: Number(typography.japaneseOpacity), rubyScale: 0.6 };
+  next.display = { ...next.display, showJapanese: Boolean(defaults.showJapanese), showAssistedRuby: Boolean(defaults.showAssistedRuby), showKatakanaRomaji: Boolean(defaults.showKatakanaRomaji) };
+  return parseReaderAppearance(next);
 }
 
-function migratedTocBinding(shortcuts: Record<typeof V2_SHORTCUT_ACTIONS[number], ShortcutBinding>): ShortcutBinding {
-  const occupied = new Set(V2_SHORTCUT_ACTIONS.map((action) => shortcutBindingId(shortcuts[action])));
-  const candidates = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "KeyT"];
-  const code = candidates.find((candidate) => !occupied.has(shortcutBindingId({ code: candidate }))) as string;
-  return { code };
+function parseBinding(value: unknown): ShortcutBinding | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (!isShortcutCode(record.code) || (record.modifier !== undefined && !["Control", "Alt", "Shift"].includes(String(record.modifier)))) return undefined;
+  return record.modifier ? { code: record.code, modifier: record.modifier as ShortcutModifier } : { code: record.code };
 }
-
-const FALLBACK_MODIFIERS: Array<ShortcutModifier | undefined> = [undefined, "Control", "Alt", "Shift"];
-
-function firstFreeBinding(occupied: Set<string>, preferredCodes: string[]): ShortcutBinding {
-  for (const modifier of FALLBACK_MODIFIERS) {
-    for (const code of preferredCodes) {
-      const binding = modifier ? { code, modifier } : { code };
-      if (!occupied.has(shortcutBindingId(binding))) return binding;
-    }
-  }
-  throw new Error("无法为阅读界面分配未占用的快捷键。");
+function parseBindings<Action extends string>(value: unknown, actions: readonly Action[]): Record<Action, ShortcutBinding> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const result = {} as Record<Action, ShortcutBinding>;
+  for (const action of actions) { const binding = parseBinding(record[action]); if (!binding) return undefined; result[action] = binding; }
+  return new Set(actions.map((action) => shortcutBindingId(result[action]))).size === actions.length ? result : undefined;
 }
-
-function migrateV3Shortcuts(
-  shortcuts: Record<typeof V3_SHORTCUT_ACTIONS[number], ShortcutBinding>,
-): Record<ShortcutAction, ShortcutBinding> {
-  const { toggleToc: previousToc, ...readingShortcuts } = shortcuts;
-  const occupied = new Set(V2_SHORTCUT_ACTIONS.map((action) => shortcutBindingId(readingShortcuts[action])));
-  let toggleToc = previousToc;
-  let toggleMenu: ShortcutBinding;
-  if (shortcutBindingId(previousToc) === shortcutBindingId({ code: "Digit1" }) && !occupied.has(shortcutBindingId({ code: "Digit1" }))) {
-    toggleMenu = { code: "Digit1" };
-    occupied.add(shortcutBindingId(toggleMenu));
-    toggleToc = firstFreeBinding(occupied, ["Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "KeyT"]);
-  } else {
-    occupied.add(shortcutBindingId(toggleToc));
-    toggleMenu = firstFreeBinding(occupied, ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "KeyM"]);
-  }
-  return { ...readingShortcuts, toggleMenu, toggleToc };
+const MODIFIERS: Array<ShortcutModifier | undefined> = [undefined, "Control", "Alt", "Shift"];
+function freeBinding(occupied: Set<string>, codes: string[]): ShortcutBinding {
+  for (const modifier of MODIFIERS) for (const code of codes) { const binding = modifier ? { code, modifier } : { code }; if (!occupied.has(shortcutBindingId(binding))) return binding; }
+  throw new Error("无法分配未占用的阅读快捷键。");
 }
+function migrateOldShortcuts(old: Record<OldShortcutAction, ShortcutBinding>): Record<ShortcutAction, ShortcutBinding> {
+  const reading = Object.fromEntries(READING_ACTIONS.map((action) => [action, old[action]])) as Pick<Record<ShortcutAction, ShortcutBinding>, typeof READING_ACTIONS[number]>;
+  const occupied = new Set(READING_ACTIONS.map((action) => shortcutBindingId(reading[action])));
+  let toggleSidebar = old.toggleMenu;
+  if (occupied.has(shortcutBindingId(toggleSidebar))) toggleSidebar = freeBinding(occupied, ["Digit1", "Digit3", "KeyM"]);
+  occupied.add(shortcutBindingId(toggleSidebar));
+  let returnLibrary = old.toggleToc;
+  if (occupied.has(shortcutBindingId(returnLibrary))) returnLibrary = freeBinding(occupied, ["Digit2", "Digit3", "KeyB"]);
+  return { ...reading, toggleSidebar, returnLibrary } as Record<ShortcutAction, ShortcutBinding>;
+}
+function oldDefaults(): Record<OldShortcutAction, ShortcutBinding> { return { ...Object.fromEntries(READING_ACTIONS.map((action) => [action, DEFAULT_SHORTCUTS[action]])), toggleMenu: { code: "Digit1" }, toggleToc: { code: "Digit2" } } as Record<OldShortcutAction, ShortcutBinding>; }
 
 export function parseReaderSettings(value: unknown): ReaderSettings | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
-  if (typeof record.navigation !== "object" || record.navigation === null) return undefined;
-  const navigation = record.navigation as Record<string, unknown>;
-  if (record.version === 1) {
+  const version = Number(record.version);
+  const navigation = record.navigation as Record<string, unknown> | undefined;
+  if (!navigation) return undefined;
+  if (version === 1) {
     if (!isNavigationStepCount(navigation.backwardTextSteps) || !isNavigationStepCount(navigation.forwardTextSteps)) return undefined;
-    return {
-      ...cloneReaderSettings(DEFAULT_READER_SETTINGS),
-      pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
-    };
+    const next = cloneReaderSettings(DEFAULT_READER_SETTINGS);
+    next.pageTransitions = Boolean(record.pageTransitions);
+    return next;
   }
-  if (record.version === 2) {
-    if (!isNavigationStepCount(navigation.textSteps)) return undefined;
-    const legacyShortcuts = parseShortcutsForActions(record.shortcuts, V2_SHORTCUT_ACTIONS);
-    if (!legacyShortcuts) return undefined;
-    return {
-      version: 6,
-      navigation: { textSteps: navigation.textSteps },
-      shortcuts: migrateV3Shortcuts({ ...legacyShortcuts, toggleToc: migratedTocBinding(legacyShortcuts) }),
-      pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
-      appearance: structuredClone(DEFAULT_READER_APPEARANCE),
-    };
-  }
-  if (record.version === 3) {
-    if (!isNavigationStepCount(navigation.textSteps)) return undefined;
-    const shortcuts = parseShortcutsForActions(record.shortcuts, V3_SHORTCUT_ACTIONS);
-    if (!shortcuts) return undefined;
-    return {
-      version: 6,
-      navigation: { textSteps: navigation.textSteps },
-      shortcuts: migrateV3Shortcuts(shortcuts),
-      pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
-      appearance: structuredClone(DEFAULT_READER_APPEARANCE),
-    };
-  }
-  if (record.version !== 4 && record.version !== 5 && record.version !== 6) return undefined;
   if (!isNavigationStepCount(navigation.textSteps)) return undefined;
-  const shortcuts = parseShortcutsForActions(record.shortcuts, SHORTCUT_ACTIONS);
-  const appearance = record.version === 5
-    ? parseAppearance(record.appearance, true)
-    : record.version === 6
-      ? parseReaderAppearance(record.appearance)
-      : structuredClone(DEFAULT_READER_APPEARANCE);
-  if (!shortcuts || !appearance) return undefined;
-  return {
-    version: 6,
-    navigation: { textSteps: navigation.textSteps },
-    shortcuts,
-    pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
-    appearance,
-  };
-}
-
-function cloneShortcuts(shortcuts: Record<ShortcutAction, ShortcutBinding>): Record<ShortcutAction, ShortcutBinding> {
-  return Object.fromEntries(SHORTCUT_ACTIONS.map((action) => [action, { ...shortcuts[action] }])) as Record<ShortcutAction, ShortcutBinding>;
-}
-
-export function cloneReaderSettings(settings: ReaderSettings): ReaderSettings {
-  return {
-    version: 6,
-    navigation: { ...settings.navigation },
-    shortcuts: cloneShortcuts(settings.shortcuts),
-    pageTransitions: settings.pageTransitions,
-    appearance: structuredClone(settings.appearance),
-  };
-}
-
-async function settingsResponse(response: Response): Promise<ReaderSettings> {
-  let value: unknown;
-  try {
-    value = await response.json();
-  } catch {
-    throw new Error("阅读设置服务返回了无效响应。");
+  if (version === 8) {
+    const shortcuts = parseBindings(record.shortcuts, SHORTCUT_ACTIONS);
+    const appearance = parseReaderAppearance(record.appearance);
+    if (!shortcuts || !appearance) return undefined;
+    return { version: 8, navigation: { textSteps: navigation.textSteps }, shortcuts, pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false, appearance };
   }
-  if (!response.ok) {
-    const message = typeof value === "object" && value !== null && "error" in value
-      ? String((value as { error: unknown }).error)
-      : `阅读设置请求失败（${response.status}）。`;
-    throw new Error(message);
+  if (version === 7) {
+    const old = parseBindings(record.shortcuts, OLD_ACTIONS);
+    const appearance = parseReaderAppearance(record.appearance);
+    if (!old || !appearance) return undefined;
+    return { version: 8, navigation: { textSteps: navigation.textSteps }, shortcuts: migrateOldShortcuts(old), pageTransitions: Boolean(record.pageTransitions), appearance };
   }
-  const settings = parseReaderSettings(value);
-  if (!settings) throw new Error("阅读设置服务返回了无效设置。");
-  return settings;
+  if (version < 2 || version > 6) return undefined;
+  const old = oldDefaults();
+  const supplied = record.shortcuts as Record<string, unknown> | undefined;
+  for (const action of READING_ACTIONS) { const binding = supplied ? parseBinding(supplied[action]) : undefined; if (version >= 2 && !binding) return undefined; if (binding) old[action] = binding; }
+  if (version >= 4) { const menu = supplied ? parseBinding(supplied.toggleMenu) : undefined; const toc = supplied ? parseBinding(supplied.toggleToc) : undefined; if (!menu || !toc) return undefined; old.toggleMenu = menu; old.toggleToc = toc; }
+  else if (version === 3) { const toc = supplied ? parseBinding(supplied.toggleToc) : undefined; if (!toc) return undefined; old.toggleToc = toc; }
+  const appearance = legacyAppearance(record.appearance, version);
+  if (!appearance) return undefined;
+  return { version: 8, navigation: { textSteps: navigation.textSteps }, shortcuts: migrateOldShortcuts(old), pageTransitions: Boolean(record.pageTransitions), appearance };
 }
 
-export async function loadReaderSettings(): Promise<ReaderSettings> {
-  return settingsResponse(await fetch("/api/settings"));
-}
-
-export async function saveReaderSettings(settings: ReaderSettings): Promise<ReaderSettings> {
-  return settingsResponse(await fetch("/api/settings", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(settings),
-  }));
-}
+function cloneShortcuts(shortcuts: Record<ShortcutAction, ShortcutBinding>): Record<ShortcutAction, ShortcutBinding> { return Object.fromEntries(SHORTCUT_ACTIONS.map((action) => [action, { ...shortcuts[action] }])) as Record<ShortcutAction, ShortcutBinding>; }
+export function cloneReaderSettings(settings: ReaderSettings): ReaderSettings { return { version: 8, navigation: { ...settings.navigation }, shortcuts: cloneShortcuts(settings.shortcuts), pageTransitions: settings.pageTransitions, appearance: structuredClone(settings.appearance) }; }
+async function settingsResponse(response: Response): Promise<ReaderSettings> { let value: unknown; try { value = await response.json(); } catch { throw new Error("阅读设置服务返回了无效响应。"); } if (!response.ok) throw new Error(typeof value === "object" && value && "error" in value ? String((value as { error: unknown }).error) : `阅读设置请求失败（${response.status}）。`); const settings = parseReaderSettings(value); if (!settings) throw new Error("阅读设置服务返回了无效设置。"); return settings; }
+export async function loadReaderSettings(): Promise<ReaderSettings> { return settingsResponse(await fetch("/api/settings")); }
+export async function saveReaderSettings(settings: ReaderSettings): Promise<ReaderSettings> { return settingsResponse(await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) })); }

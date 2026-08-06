@@ -7,6 +7,7 @@ interface SpatialNavigationOptions {
   enabled: boolean;
   editing?: boolean;
   onActivate?(element: HTMLElement): boolean | void;
+  keys?: "wasd" | "arrows" | "both";
 }
 
 function isSpatialItem(element: HTMLElement): boolean {
@@ -37,7 +38,8 @@ function nearestByAxis(elements: HTMLElement[], current: HTMLElement, axis: "x" 
 }
 
 function zoneOrder(element: HTMLElement): number {
-  const value = Number(element.dataset.spatialZoneOrder);
+  const owner = element.closest<HTMLElement>("[data-spatial-zone-order]");
+  const value = Number(element.dataset.spatialZoneOrder ?? owner?.dataset.spatialZoneOrder);
   return Number.isFinite(value) ? value : 0;
 }
 
@@ -80,17 +82,24 @@ function focusSpatialItem(element: HTMLElement): void {
   element.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-export function useSpatialNavigation({ rootRef, enabled, editing = false, onActivate }: SpatialNavigationOptions): void {
+export function useSpatialNavigation({ rootRef, enabled, editing = false, onActivate, keys = "wasd" }: SpatialNavigationOptions): void {
   useEffect(() => {
     if (!enabled) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (editing || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      const direction = {
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) return;
+      const directions = {
         KeyW: "up",
         KeyS: "down",
         KeyA: "left",
         KeyD: "right",
+        ArrowUp: "up",
+        ArrowDown: "down",
+        ArrowLeft: "left",
+        ArrowRight: "right",
       }[event.code] as SpatialDirection | undefined;
+      const direction = directionAllowed(event.code, keys) ? directions : undefined;
       if (!direction && event.code !== "Space") return;
       const root = rootRef.current;
       if (!root) return;
@@ -114,5 +123,11 @@ export function useSpatialNavigation({ rootRef, enabled, editing = false, onActi
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [editing, enabled, onActivate, rootRef]);
+  }, [editing, enabled, keys, onActivate, rootRef]);
+}
+
+function directionAllowed(code: string, keys: "wasd" | "arrows" | "both"): boolean {
+  if (code.startsWith("Arrow")) return keys === "arrows" || keys === "both";
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(code)) return keys === "wasd" || keys === "both";
+  return false;
 }

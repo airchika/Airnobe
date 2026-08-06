@@ -25,19 +25,16 @@ export function InlineContent({
         const visible = node.readingType === "romaji"
           ? showKatakanaRomaji
           : node.origin === "source" || showAssistedRuby;
-        if (!visible) {
-          return <Fragment key={key}>{node.segments.map((segment) => segment.base).join("")}</Fragment>;
-        }
         return (
           <Fragment key={key}>
             {node.segments.map((segment, segmentIndex) => (
               <ruby
-                className={`ruby ruby--${node.origin}${node.readingType === "romaji" ? " ruby--romaji" : ""}`}
+                className={`ruby ruby--${node.origin}${node.readingType === "romaji" ? " ruby--romaji" : ""}${visible ? "" : " ruby--hidden"}`}
                 data-ruby-origin={node.origin}
                 data-ruby-reading-type={node.readingType}
                 key={`${key}-${segmentIndex}`}
               >
-                {segment.base}<rt>{segment.reading}</rt>
+                {segment.base}<rt aria-hidden={!visible}>{segment.reading}</rt>
               </ruby>
             ))}
           </Fragment>

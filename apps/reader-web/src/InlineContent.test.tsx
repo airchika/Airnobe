@@ -19,22 +19,22 @@ describe("InlineContent", () => {
       <InlineContent nodes={nodes} showAssistedRuby={false} showKatakanaRomaji={false} assetUrlById={new Map()} onInternalLink={() => {}} />,
     );
     expect(screen.getByText("まち")).toBeInTheDocument();
-    expect(screen.queryByText("とびら")).not.toBeInTheDocument();
-    expect(screen.queryByText("まど")).not.toBeInTheDocument();
-    expect(screen.queryByText("gēmu")).not.toBeInTheDocument();
+    expect(screen.getByText("とびら").parentElement).toHaveClass("ruby--hidden");
+    expect(screen.getByText("まど").parentElement).toHaveClass("ruby--hidden");
+    expect(screen.getByText("gēmu").parentElement).toHaveClass("ruby--hidden");
     expect(screen.getByText(/窓/)).toBeInTheDocument();
 
     rerender(<InlineContent nodes={nodes} showAssistedRuby showKatakanaRomaji={false} assetUrlById={new Map()} onInternalLink={() => {}} />);
     expect(screen.getByText("とびら")).toBeInTheDocument();
     expect(screen.getByText("まど")).toBeInTheDocument();
-    expect(screen.queryByText("gēmu")).not.toBeInTheDocument();
+    expect(screen.getByText("gēmu").parentElement).toHaveClass("ruby--hidden");
     expect(document.querySelector('[data-ruby-origin="source"]')).toHaveClass("ruby--source");
     expect(document.querySelector('[data-ruby-origin="reused"]')).toHaveClass("ruby--reused");
     expect(document.querySelector('[data-ruby-origin="generated"]')).toHaveClass("ruby--generated");
 
     rerender(<InlineContent nodes={nodes} showAssistedRuby={false} showKatakanaRomaji assetUrlById={new Map()} onInternalLink={() => {}} />);
-    expect(screen.queryByText("とびら")).not.toBeInTheDocument();
-    expect(screen.queryByText("まど")).not.toBeInTheDocument();
+    expect(screen.getByText("とびら").parentElement).toHaveClass("ruby--hidden");
+    expect(screen.getByText("まど").parentElement).toHaveClass("ruby--hidden");
     expect(screen.getByText("gēmu")).toBeInTheDocument();
     expect(document.querySelector('[data-ruby-reading-type="romaji"]')).toHaveClass("ruby--romaji");
   });

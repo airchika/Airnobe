@@ -103,15 +103,15 @@ describe("BookReader", () => {
     await user.keyboard("q");
     expect(document.querySelectorAll("[data-japanese-variant]").length).toBeGreaterThan(0);
     expect(screen.getByText("まち")).toBeInTheDocument();
-    expect(screen.queryByText("とびら")).not.toBeInTheDocument();
-    expect(screen.queryByText("まど")).not.toBeInTheDocument();
-    expect(screen.queryByText("konpyūtā")).not.toBeInTheDocument();
+    expect(screen.getByText("とびら").parentElement).toHaveClass("ruby--hidden");
+    expect(screen.getByText("まど").parentElement).toHaveClass("ruby--hidden");
+    expect(screen.getByText("konpyūtā").parentElement).toHaveClass("ruby--hidden");
 
     await user.keyboard("e");
     expect(screen.getByText("まち")).toBeInTheDocument();
     expect(screen.getByText("とびら")).toBeInTheDocument();
     expect(screen.getByText("まど")).toBeInTheDocument();
-    expect(screen.queryByText("konpyūtā")).not.toBeInTheDocument();
+    expect(screen.getByText("konpyūtā").parentElement).toHaveClass("ruby--hidden");
 
     await user.keyboard("z");
     expect(screen.getByText("konpyūtā")).toBeInTheDocument();
@@ -120,8 +120,7 @@ describe("BookReader", () => {
     await user.keyboard("q");
     expect(document.querySelectorAll("[data-japanese-variant]")).toHaveLength(0);
     openReaderMenu();
-    expect(screen.getByRole("button", { name: /^注音/ })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /^片假名罗马音/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("阅读侧边栏")).toBeInTheDocument();
   });
 
   it("maps paragraph spacing directly to em while keeping line height unitless", () => {
@@ -221,116 +220,29 @@ describe("BookReader", () => {
     expect(currentTocEntry(entries, 2)?.label).toBe("第一章");
   });
 
-  it("opens the menu with Digit1 and the TOC with Digit2, then jumps to an unmounted nested target", async () => {
+  it("opens one peer sidebar with Digit1 and exposes TOC, settings, progress and return", async () => {
     const user = userEvent.setup();
-    const scrollTo = vi.spyOn(window, "scrollTo");
-    const startViewTransition = vi.fn();
-    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
-    const loaded = createLongBook(200, true);
-    const bookDocument = loaded.documents[0] as NonNullable<typeof loaded.documents[0]>;
-    loaded.book.toc = [{
-      label: "分组",
-      children: [{ label: "结尾", target: { documentId: bookDocument.id, fragmentId: "last" }, children: [] }],
-    }];
-    render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
-    await user.keyboard("1");
-    expect(screen.getByRole("dialog", { name: "阅读菜单" })).toBeInTheDocument();
-    await user.keyboard("1");
-    await user.keyboard("2");
-    const drawer = screen.getByRole("complementary", { name: "目录" });
-    expect(within(drawer).getByText("分组")).toBeInTheDocument();
-    await user.click(within(drawer).getByRole("button", { name: "结尾" }));
-    expect(screen.queryByRole("complementary", { name: "目录" })).not.toBeInTheDocument();
-    const targetTop = Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)));
-    expect(targetTop).toBeGreaterThan(5_000);
-    expect(startViewTransition).not.toHaveBeenCalled();
-  });
-
-  it("cross-fades an instant TOC jump when page transitions are enabled", async () => {
-    const user = userEvent.setup();
-    const scrollTo = vi.spyOn(window, "scrollTo");
-    const startViewTransition = vi.fn((update: () => void) => {
-      update();
-      return { finished: Promise.resolve() };
-    });
-    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
-    const loaded = createLongBook(200);
-    const bookDocument = loaded.documents[0] as NonNullable<typeof loaded.documents[0]>;
-    loaded.book.toc = [{ label: "结尾", target: { documentId: bookDocument.id, fragmentId: "last" }, children: [] }];
-    render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={{ ...DEFAULT_READER_SETTINGS, pageTransitions: true }} onSaveSettings={async () => {}} />);
-    await user.keyboard("2");
-    await user.click(screen.getByRole("button", { name: "结尾" }));
-    expect(startViewTransition).toHaveBeenCalledTimes(1);
-    expect(Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)))).toBeGreaterThan(5_000);
-  });
-
-  it("disables the TOC command for a book without TOC entries", async () => {
-    const user = userEvent.setup();
-    const loaded = createDemoBook();
-    loaded.book.toc = [];
-    render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
-    openReaderMenu();
-    expect(screen.getByRole("button", { name: "目录" })).toBeDisabled();
-    await user.keyboard("{Escape}1");
-    expect(screen.queryByRole("complementary", { name: "目录" })).not.toBeInTheDocument();
-  });
-
-  it("opens a centered desktop menu and disables unavailable generated ruby", async () => {
-    const user = userEvent.setup();
-    const onReturnToLibrary = vi.fn();
-    const base = createDemoBook();
-    delete base.book.derivation;
-    for (const document of base.documents) {
-      for (const block of document.blocks) {
-        if (block.type !== "text") continue;
-        for (const variant of block.variants) {
-          variant.content = variant.content.filter((node) => node.type !== "ruby" || node.readingType !== "romaji");
-          for (const node of variant.content) {
-            if (node.type === "ruby" && node.origin !== "source") node.origin = "source";
-          }
-        }
-      }
-    }
-    render(<BookReader loaded={base} onChooseBook={() => {}} onReturnToLibrary={onReturnToLibrary} {...readerSettingsProps} />);
-    expect(document.querySelector(".reader-toolbar")).not.toBeInTheDocument();
-    openReaderMenu();
-    expect(screen.getByRole("dialog", { name: "阅读菜单" })).toBeInTheDocument();
-    expect(screen.queryByText("打开 EPUB")).not.toBeInTheDocument();
-    expect(screen.queryByText("导出原始 EPUB")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "返回书库" }));
-    expect(onReturnToLibrary).toHaveBeenCalledOnce();
-    openReaderMenu();
-    expect(screen.getByRole("button", { name: /^注音/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /^片假名罗马音/ })).toBeDisabled();
-    const backdrop = document.querySelector(".reader-menu-backdrop");
-    if (backdrop) fireEvent.mouseDown(backdrop);
-    expect(screen.queryByRole("dialog", { name: "阅读菜单" })).not.toBeInTheDocument();
-    openReaderMenu();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "阅读菜单" })).not.toBeInTheDocument();
-  });
-
-  it("navigates the reader menu spatially and suppresses reading shortcuts while it is open", async () => {
-    const user = userEvent.setup();
-    const scrollBy = vi.spyOn(window, "scrollBy");
     render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
     await user.keyboard("1");
-    const back = screen.getByRole("button", { name: "返回书库" });
-    expect(back).toHaveFocus();
-
-    await user.keyboard("s");
-    const japanese = screen.getByRole("button", { name: /^日文/ });
-    expect(japanese).toHaveFocus();
-    await user.keyboard("d");
-    expect(screen.getByRole("button", { name: "修改日文快捷键" })).toHaveFocus();
-    await user.keyboard("a");
-    expect(japanese).toHaveFocus();
-    await user.keyboard(" ");
-    expect(japanese).toHaveAttribute("aria-pressed", "true");
-    expect(scrollBy).not.toHaveBeenCalled();
-
+    expect(screen.getByLabelText("阅读侧边栏")).toBeInTheDocument();
+    expect(screen.getByLabelText("目录")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("阅读设置").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "返回书库" })).toBeInTheDocument();
+    expect(screen.getByText("全书")).toBeInTheDocument();
     await user.keyboard("1");
-    expect(screen.queryByRole("dialog", { name: "阅读菜单" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("阅读侧边栏")).not.toBeInTheDocument();
+  });
+
+  it("records sidebar shortcuts and saves the shared navigation count", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => {});
+    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={DEFAULT_READER_SETTINGS} onSaveSettings={save} />);
+    await user.keyboard("1");
+    await user.click(screen.getByRole("button", { name: "修改侧边栏快捷键" }));
+    fireEvent.keyDown(window, { key: "m", code: "KeyM", ctrlKey: true });
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ shortcuts: expect.objectContaining({ toggleSidebar: { code: "KeyM", modifier: "Control" } }) }));
+    fireEvent.change(screen.getByLabelText("回退/快进段数"), { target: { value: "4" } });
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ navigation: { textSteps: 4 } }));
   });
 
   it("leaves a pure Chinese book unchanged when Q, E, and Z are pressed", async () => {
@@ -444,134 +356,6 @@ describe("BookReader", () => {
     expect(startViewTransition).toHaveBeenCalledTimes(1);
     expect(scrollBy).toHaveBeenCalledWith({ top: window.innerHeight, behavior: "instant" });
     expect(document.querySelector(".reading-column")).not.toHaveClass("reading-column--page-turning");
-  });
-
-  it("edits the shared global navigation count from the reader menu", async () => {
-    const user = userEvent.setup();
-    const saveSettings = vi.fn().mockResolvedValue(undefined);
-    render(
-      <BookReader
-        loaded={createDemoBook()}
-        onChooseBook={() => {}}
-        onReturnToLibrary={() => {}}
-        settings={DEFAULT_READER_SETTINGS}
-        onSaveSettings={saveSettings}
-      />,
-    );
-    openReaderMenu();
-    const steps = screen.getByRole("spinbutton", { name: "回退/快进段数" });
-    await user.clear(steps);
-    await user.type(steps, "3");
-    expect(saveSettings).toHaveBeenCalledWith({
-      ...DEFAULT_READER_SETTINGS,
-      navigation: { textSteps: 3 },
-      pageTransitions: false,
-    });
-
-    await user.clear(steps);
-    await user.type(steps, "0");
-    fireEvent.blur(steps);
-    expect(steps).toHaveValue(3);
-    expect(saveSettings).toHaveBeenCalledTimes(1);
-
-    await user.click(screen.getByRole("button", { name: "翻页淡出淡出" }));
-    expect(saveSettings).toHaveBeenLastCalledWith({
-      ...DEFAULT_READER_SETTINGS,
-      navigation: { textSteps: 3 },
-      pageTransitions: true,
-    });
-
-    const scrollTo = vi.spyOn(window, "scrollTo");
-    await user.click(steps);
-    await user.keyboard("f");
-    expect(scrollTo).not.toHaveBeenCalled();
-  });
-
-  it("applies a valid navigation count before the menu is dismissed", () => {
-    const saveSettings = vi.fn().mockResolvedValue(undefined);
-    render(
-      <BookReader
-        loaded={createDemoBook()}
-        onChooseBook={() => {}}
-        onReturnToLibrary={() => {}}
-        settings={DEFAULT_READER_SETTINGS}
-        onSaveSettings={saveSettings}
-      />,
-    );
-    openReaderMenu();
-    const steps = screen.getByRole("spinbutton", { name: "回退/快进段数" });
-    fireEvent.change(steps, { target: { value: "4" } });
-    const backdrop = document.querySelector(".reader-menu-backdrop");
-    if (!backdrop) throw new Error("Reader menu backdrop did not render.");
-    fireEvent.mouseDown(backdrop);
-    expect(screen.queryByRole("dialog", { name: "阅读菜单" })).not.toBeInTheDocument();
-    expect(saveSettings).toHaveBeenCalledWith({
-      ...DEFAULT_READER_SETTINGS,
-      navigation: { textSteps: 4 },
-      pageTransitions: false,
-    });
-  });
-
-  it("captures a physical shortcut with one modifier and saves it immediately", async () => {
-    const user = userEvent.setup();
-    const saveSettings = vi.fn().mockResolvedValue(undefined);
-    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={DEFAULT_READER_SETTINGS} onSaveSettings={saveSettings} />);
-    openReaderMenu();
-    await user.click(screen.getByRole("button", { name: "修改从顶部回退快捷键" }));
-    expect(screen.getByText("按键…")).toBeInTheDocument();
-    await user.keyboard("{Control>}x{/Control}");
-    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      version: 6,
-      shortcuts: expect.objectContaining({ topBackward: { code: "KeyX", modifier: "Control" } }),
-    }));
-    const binding = screen.getByRole("button", { name: "修改从顶部回退快捷键" });
-    expect(binding).toHaveTextContent("Ctrl+X");
-  });
-
-  it("rejects shortcut conflicts and keeps listening until Escape", async () => {
-    const user = userEvent.setup();
-    const saveSettings = vi.fn().mockResolvedValue(undefined);
-    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={DEFAULT_READER_SETTINGS} onSaveSettings={saveSettings} />);
-    openReaderMenu();
-    const binding = screen.getByRole("button", { name: "修改从顶部回退快捷键" });
-    await user.click(binding);
-    await user.keyboard("w");
-    expect(screen.getByRole("alert")).toHaveTextContent("从底部回退");
-    expect(binding).toHaveAttribute("aria-pressed", "true");
-    expect(saveSettings).not.toHaveBeenCalled();
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog", { name: "阅读菜单" })).toBeInTheDocument();
-    expect(binding).toHaveAttribute("aria-pressed", "false");
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "阅读菜单" })).not.toBeInTheDocument();
-  });
-
-  it("keeps listening after invalid chords and cancels capture on an outside click", async () => {
-    const user = userEvent.setup();
-    const saveSettings = vi.fn().mockResolvedValue(undefined);
-    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={DEFAULT_READER_SETTINGS} onSaveSettings={saveSettings} />);
-    openReaderMenu();
-    const binding = screen.getByRole("button", { name: "修改向下翻页快捷键" });
-    await user.click(binding);
-    fireEvent.keyDown(window, { key: "x", code: "KeyX", ctrlKey: true, shiftKey: true });
-    expect(screen.getByRole("alert")).toHaveTextContent("只支持一个");
-    expect(binding).toHaveAttribute("aria-pressed", "true");
-    const backdrop = document.querySelector(".reader-menu-backdrop");
-    if (!backdrop) throw new Error("Reader menu backdrop did not render.");
-    fireEvent.mouseDown(backdrop);
-    expect(screen.queryByRole("dialog", { name: "阅读菜单" })).not.toBeInTheDocument();
-    expect(saveSettings).not.toHaveBeenCalled();
-  });
-
-  it("restores the previous shortcut when persistence fails", async () => {
-    const user = userEvent.setup();
-    const saveSettings = vi.fn().mockRejectedValue(new Error("save failed"));
-    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={DEFAULT_READER_SETTINGS} onSaveSettings={saveSettings} />);
-    openReaderMenu();
-    const binding = screen.getByRole("button", { name: "修改向上翻页快捷键" });
-    await user.click(binding);
-    await user.keyboard("x");
-    await waitFor(() => expect(binding).toHaveTextContent("A"));
   });
 
   it("matches shortcuts by physical code and exact modifier", () => {

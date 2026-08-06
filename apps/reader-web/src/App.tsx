@@ -31,7 +31,7 @@ import { EMPTY_READING_STATE, readingProgressSummary, type ReadingPosition } fro
 import { useSpatialNavigation } from "./spatial-navigation.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { builtinThemeOptions, importTheme as importCustomTheme, loadThemes, type AvailableTheme } from "./theme-client.js";
-import { applyTheme, BUILTIN_THEMES, DEFAULT_THEME_ID, type ThemeDefinition } from "./themes.js";
+import { applyTheme, BUILTIN_THEMES, DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, type ThemeDefinition } from "./themes.js";
 
 export function App() {
   const initialDemo = new URLSearchParams(window.location.search).get("demo") === "1";
@@ -52,6 +52,7 @@ export function App() {
   const [settings, setSettings] = useState<ReaderSettings>(() => cloneReaderSettings(DEFAULT_READER_SETTINGS));
   const [themes, setThemes] = useState<AvailableTheme[]>(builtinThemeOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true);
   const [duplicateSelectEditing, setDuplicateSelectEditing] = useState(false);
   const epubInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
@@ -87,10 +88,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const selected = themes.find((item) => item.theme.id === settings.appearance.themeId)?.theme
-      ?? BUILTIN_THEMES.find((theme) => theme.id === DEFAULT_THEME_ID)!;
+    const query = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!query) return;
+    const change = () => setSystemDark(query.matches);
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  }, []);
+
+  useEffect(() => {
+    const dark = settings.appearance.theme.mode === "night" || (settings.appearance.theme.mode === "system" && systemDark);
+    const selectedId = dark ? settings.appearance.theme.darkThemeId : settings.appearance.theme.lightThemeId;
+    const fallbackId = dark ? DEFAULT_DARK_THEME_ID : DEFAULT_LIGHT_THEME_ID;
+    const selected = themes.find((item) => item.theme.id === selectedId && item.theme.variant === (dark ? "dark" : "light"))?.theme
+      ?? BUILTIN_THEMES.find((theme) => theme.id === fallbackId)!;
     applyTheme(selected);
-  }, [settings.appearance.themeId, themes]);
+  }, [settings.appearance.theme, systemDark, themes]);
 
   const refreshLibrary = useCallback(async (preferredBookId?: string): Promise<void> => {
     const books = await loadLibrary();
@@ -118,10 +130,12 @@ export function App() {
   const openEpubPicker = (): void => epubInputRef.current?.click();
 
   const saveSettings = async (next: ReaderSettings): Promise<void> => {
+    const previous = settings;
     try {
       setError(undefined);
       setSettings(await saveReaderSettings(next));
     } catch (settingsError) {
+      setSettings(previous);
       setError((settingsError as Error).message);
       throw settingsError;
     }
@@ -329,8 +343,11 @@ export function App() {
             onReturnToLibrary={returnToLibrary}
             settings={settings}
             onSaveSettings={saveSettings}
+            onPreviewSettings={setSettings}
             onSaveReadingPosition={saveBookReadingPosition}
-            onOpenSettings={() => setSettingsOpen(true)}
+            themes={themes}
+            onImportTheme={(theme) => importCustomTheme(theme)}
+            onThemesChange={setThemes}
             keyboardNavigationEnabled={keyboardNavigationEnabled}
           />
         : <LibraryView
@@ -351,6 +368,7 @@ export function App() {
       {settingsOpen && <SettingsPanel
         settings={settings}
         themes={themes}
+        scope={loaded ? "reader" : "library"}
         onPreview={(next) => setSettings(next)}
         onSave={saveSettings}
         onImport={(theme: ThemeDefinition) => importCustomTheme(theme)}

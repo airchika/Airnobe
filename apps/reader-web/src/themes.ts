@@ -54,7 +54,9 @@ function builtin(value: unknown): ThemeDefinition {
 
 export const BUILTIN_THEMES: ThemeDefinition[] = [airnobeNight, absolutely, oneDark, xcodeDark, warmPaper].map(builtin);
 export const BUILTIN_THEME_IDS = new Set(BUILTIN_THEMES.map((theme) => theme.id));
-export const DEFAULT_THEME_ID = "airnobe-night";
+export const DEFAULT_DARK_THEME_ID = "airnobe-night";
+export const DEFAULT_LIGHT_THEME_ID = "warm-paper";
+export const DEFAULT_THEME_ID = DEFAULT_DARK_THEME_ID;
 
 const CSS_VARIABLES: Record<ThemeColorKey, string> = {
   background: "--background", surface: "--surface", surfaceRaised: "--surface-raised", sidebar: "--sidebar",
