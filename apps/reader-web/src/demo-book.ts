@@ -115,7 +115,7 @@ const document: BookDocument = {
 
 const book: BookManifest = {
   format: "airnobe-book",
-  version: 3,
+  version: 4,
   id: "book-demo",
   source: {
     fileName: "demo.epub",
@@ -154,6 +154,7 @@ const report: ConversionReport = {
     spineDocumentCount: 1,
     outputDocumentCount: 1,
     textBlockCount: 4,
+    spacerBlockCount: 0,
     parallelBlockCount: 4,
     sourceRubyCount: 1,
     reusedRubyCount: 1,

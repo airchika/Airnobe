@@ -245,10 +245,11 @@ function flattenDocuments(documents: BookDocument[]): ReaderRow[] {
   })));
 }
 
-function estimateRowSize(row: ReaderRow): number {
+function estimateRowSize(row: ReaderRow, spacerHeight = 30.4): number {
   const documentSpacing = row.documentStart ? 64 : 0;
   if (row.block.type === "image") return 560 + documentSpacing;
   if (row.block.type === "divider") return 112 + documentSpacing;
+  if (row.block.type === "spacer") return spacerHeight + documentSpacing;
   if (row.block.role === "heading") return 128 + documentSpacing;
   if (row.block.role === "caption") return 54 + documentSpacing;
   return 72 + documentSpacing;
@@ -278,8 +279,9 @@ export function findNavigationTarget(
     index += direction;
     const row = rows[index];
     if (!row) return lastNavigable;
-    if (row.block.type === "divider") continue;
+    if (row.block.type === "divider" || row.block.type === "spacer") continue;
     if (row.block.type === "image") return passedText ? lastNavigable : index;
+    if (row.block.type !== "text") continue;
     lastNavigable = index;
     passedText = true;
     remainingTextSteps -= 1;
@@ -343,13 +345,38 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
   );
   const activeTocEntry = useMemo(() => currentTocEntry(tocEntries, currentRowIndex), [currentRowIndex, tocEntries]);
 
+  const initialReadingPosition = loaded.readingState.position;
+  const initialTargetIndex = initialReadingPosition ? rowIndexByBlockId.get(initialReadingPosition.blockId) : undefined;
+  const initialTargetRow = initialTargetIndex === undefined ? undefined : rows[initialTargetIndex];
+  const validInitialTarget = initialReadingPosition
+    && initialTargetIndex !== undefined
+    && initialTargetRow?.documentId === initialReadingPosition.documentId
+    && isNavigationRow(initialTargetRow)
+    ? initialTargetIndex
+    : undefined;
+  const estimatedSpacerHeight = settings.appearance.typography.fontSize * (
+    settings.appearance.typography.lineHeight + settings.appearance.typography.paragraphSpacing
+  );
+  const initialScrollOffset = useMemo(() => {
+    if (validInitialTarget === undefined || !initialReadingPosition) return 0;
+    const targetStart = rows.slice(0, validInitialTarget)
+      .reduce((total, row) => total + estimateRowSize(row, estimatedSpacerHeight), 0);
+    return Math.max(0, targetStart - READING_EDGE);
+  }, [estimatedSpacerHeight, initialReadingPosition, rows, validInitialTarget]);
+
   const virtualizer = useWindowVirtualizer<HTMLElement>({
     count: rows.length,
-    estimateSize: (index) => estimateRowSize(rows[index] as ReaderRow),
+    estimateSize: (index) => estimateRowSize(
+      rows[index] as ReaderRow,
+      settings.appearance.typography.fontSize * (
+        settings.appearance.typography.lineHeight + settings.appearance.typography.paragraphSpacing
+      ),
+    ),
     getItemKey: (index) => (rows[index] as ReaderRow).block.id,
     measureElement: (element) => element.getBoundingClientRect().height,
     overscan: OVERSCAN,
     scrollPaddingStart: READING_EDGE,
+    initialOffset: initialScrollOffset,
   });
 
   const captureReadingPosition = useCallback((): ReadingPosition | undefined => {
@@ -363,7 +390,7 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
     return {
       documentId: row.documentId,
       blockId: row.block.id,
-      viewportOffset: anchor?.top ?? READING_EDGE,
+      viewportOffset: READING_EDGE,
       progress,
       chapterLabel: currentTocEntry(tocEntries, rowIndex)?.label ?? null,
     };
@@ -388,10 +415,9 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
   useEffect(() => {
     if (restoredPositionRef.current) return;
     restoredPositionRef.current = true;
-    const position = loaded.readingState.position;
-    const targetIndex = position ? rowIndexByBlockId.get(position.blockId) : undefined;
-    const targetRow = targetIndex === undefined ? undefined : rows[targetIndex];
-    if (!position || targetIndex === undefined || targetRow?.documentId !== position.documentId || !isNavigationRow(targetRow)) {
+    const position = initialReadingPosition;
+    const targetIndex = validInitialTarget;
+    if (!position || targetIndex === undefined) {
       progressFrameRef.current = requestAnimationFrame(() => {
         const anchor = captureReadingAnchor("top");
         setCurrentRowIndex(anchor ? rowIndexByBlockId.get(anchor.id) : navigableRowIndices[0]);
@@ -405,11 +431,11 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
       restoreFrameRef.current = requestAnimationFrame(() => {
         const element = document.getElementById(position.blockId);
         if (!element) return;
-        const delta = element.getBoundingClientRect().top - position.viewportOffset;
+        const delta = element.getBoundingClientRect().top - READING_EDGE;
         if (Math.abs(delta) > 0.5) window.scrollBy({ top: delta, behavior: "instant" });
       });
     });
-  }, [loaded.readingState.position, navigableRowIndices, rowIndexByBlockId, rows, virtualizer]);
+  }, [initialReadingPosition, navigableRowIndices, rowIndexByBlockId, validInitialTarget, virtualizer]);
 
   useEffect(() => {
     const updateCurrentPosition = (): void => {
@@ -448,7 +474,7 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
     measureMountedRows(virtualizer);
     restoreReadingAnchor(anchor);
     appearanceAnchorRef.current = captureReadingAnchor("top");
-  }, [settings.appearance.typography.columnWidth, settings.appearance.typography.fontSize, settings.appearance.typography.fontWeight, settings.appearance.typography.lineHeight, settings.appearance.typography.japaneseOpacity, virtualizer]);
+  }, [settings.appearance.typography.columnWidth, settings.appearance.typography.fontSize, settings.appearance.typography.fontWeight, settings.appearance.typography.lineHeight, settings.appearance.typography.paragraphSpacing, settings.appearance.typography.japaneseOpacity, virtualizer]);
 
   useEffect(() => {
     if (!document.fonts) return;
@@ -504,22 +530,19 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
     const currentIndex = anchor ? rowIndexByBlockId.get(anchor.id) : undefined;
     const targetIndex = findNavigationTarget(rows, currentIndex, direction, textSteps);
     if (targetIndex !== undefined) {
-      virtualizer.scrollToIndex(targetIndex, { align: edge === "top" ? "start" : "end" });
+      virtualizer.scrollToIndex(targetIndex, { align: edge === "top" ? "start" : "end", behavior: "smooth" });
     }
   }, [rowIndexByBlockId, rows, virtualizer]);
 
-  const turnPage = useCallback((direction: -1 | 1) => {
-    const distance = direction * window.innerHeight;
+  const performViewChange = useCallback((update: () => void) => {
     if (!pageTransitions || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      window.scrollBy({ top: distance, behavior: "instant" });
+      update();
       return;
     }
     if (pageTurnInProgressRef.current) return;
     pageTurnInProgressRef.current = true;
     if (typeof document.startViewTransition === "function") {
-      const transition = document.startViewTransition(() => {
-        window.scrollBy({ top: distance, behavior: "instant" });
-      });
+      const transition = document.startViewTransition(update);
       void transition.finished.then(
         () => { pageTurnInProgressRef.current = false; },
         () => { pageTurnInProgressRef.current = false; },
@@ -528,13 +551,17 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
     }
     setPageTurning(true);
     pageTurnTimerRef.current = window.setTimeout(() => {
-      window.scrollBy({ top: distance, behavior: "instant" });
+      update();
       setPageTurning(false);
       pageTurnReleaseTimerRef.current = window.setTimeout(() => {
         pageTurnInProgressRef.current = false;
       }, PAGE_TURN_FADE_IN_MS);
     }, PAGE_TURN_FADE_OUT_MS);
   }, [pageTransitions]);
+
+  const turnPage = useCallback((direction: -1 | 1) => {
+    performViewChange(() => window.scrollBy({ top: direction * window.innerHeight, behavior: "instant" }));
+  }, [performViewChange]);
 
   useEffect(() => () => {
     if (pageTurnTimerRef.current !== undefined) window.clearTimeout(pageTurnTimerRef.current);
@@ -547,7 +574,7 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
     if (!isNavigationStepCount(parsed)) return;
     if (parsed === navigation.textSteps) return;
     const next: ReaderSettings = {
-      version: 5,
+      version: 6,
       navigation: { textSteps: parsed },
       shortcuts,
       pageTransitions,
@@ -570,7 +597,7 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
   const togglePageTransitions = useCallback(() => {
     const nextPageTransitions = !pageTransitions;
     setPageTransitions(nextPageTransitions);
-    void onSaveSettings({ version: 5, navigation, shortcuts, pageTransitions: nextPageTransitions, appearance: settings.appearance }).catch(() => {
+    void onSaveSettings({ version: 6, navigation, shortcuts, pageTransitions: nextPageTransitions, appearance: settings.appearance }).catch(() => {
       setPageTransitions(settings.pageTransitions);
     });
   }, [navigation, onSaveSettings, pageTransitions, settings.appearance, settings.pageTransitions, shortcuts]);
@@ -681,7 +708,7 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
         const previousShortcuts = shortcuts;
         const nextShortcuts = { ...shortcuts, [capturingAction]: candidate };
         const next: ReaderSettings = {
-          version: 5,
+          version: 6,
           navigation,
           shortcuts: nextShortcuts,
           pageTransitions,
@@ -780,11 +807,13 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
 
   const followTocEntry = useCallback((entry: TocEntry) => {
     if (entry.targetIndex === undefined) return;
-    setTocOpen(false);
+    flushSync(() => setTocOpen(false));
     restoreOverlayFocus();
-    setCurrentRowIndex(entry.targetIndex);
-    virtualizer.scrollToIndex(entry.targetIndex, { align: "start" });
-  }, [restoreOverlayFocus, virtualizer]);
+    performViewChange(() => {
+      setCurrentRowIndex(entry.targetIndex);
+      virtualizer.scrollToIndex(entry.targetIndex as number, { align: "start" });
+    });
+  }, [performViewChange, restoreOverlayFocus, virtualizer]);
 
   return (
     <div
@@ -796,6 +825,8 @@ export function BookReader({ loaded, onReturnToLibrary, onOpenSettings, settings
         "--reader-font-size": `${settings.appearance.typography.fontSize}px`,
         "--reader-font-weight": settings.appearance.typography.fontWeight,
         "--reader-line-height": settings.appearance.typography.lineHeight,
+        "--reader-paragraph-spacing": `${settings.appearance.typography.paragraphSpacing}em`,
+        "--reader-line-box": `${settings.appearance.typography.fontSize * settings.appearance.typography.lineHeight}px`,
         "--japanese-opacity": settings.appearance.typography.japaneseOpacity,
       } as CSSProperties}
       onContextMenu={(event) => {
@@ -1019,6 +1050,9 @@ const Block = memo(function Block({ block, loaded, showJapanese, showAssistedRub
     return source
       ? <div className="divider-block" id={block.id}><img src={source} alt="" loading="lazy" /></div>
       : <div className="divider-block divider-block--plain" id={block.id} aria-hidden="true"><span>◆</span></div>;
+  }
+  if (block.type === "spacer") {
+    return <div className="spacer-block" id={block.id} aria-hidden="true" />;
   }
 
   const primary = primaryVariant(block);

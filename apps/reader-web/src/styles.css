@@ -65,7 +65,7 @@
 }
 
 html {
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   scrollbar-color: var(--muted) var(--background);
 }
 
@@ -440,6 +440,14 @@ a.secondary-action {
   padding: 0 15px;
 }
 
+.library-detail-actions--maintenance {
+  margin-top: 8px;
+}
+
+.danger-action {
+  color: var(--danger);
+}
+
 .shortcut-preview {
   display: flex;
   flex-wrap: wrap;
@@ -530,7 +538,11 @@ kbd {
 }
 
 .text-block {
-  margin: 0 0 1.24em;
+  margin: 0;
+}
+
+.text-block--paragraph {
+  margin-bottom: var(--reader-paragraph-spacing, 1em);
 }
 
 .text-block--heading {
@@ -542,6 +554,7 @@ kbd {
 }
 
 .text-block--caption {
+  margin-bottom: 1.24em;
   color: var(--muted);
   font-size: 13px;
   text-align: center;
@@ -558,7 +571,7 @@ kbd {
   font-family: "Sarasa Gothic SC", "Microsoft YaHei", sans-serif;
   font-size: var(--reader-font-size, 19px);
   font-weight: var(--reader-font-weight, 400);
-  line-height: var(--reader-line-height, 2.05);
+  line-height: var(--reader-line-height, 1.6);
 }
 
 .content-variant--ja {
@@ -568,7 +581,7 @@ kbd {
   font-family: "Sarasa Gothic J", "Yu Gothic", sans-serif;
   font-size: var(--reader-font-size, 19px);
   font-weight: var(--reader-font-weight, 400);
-  line-height: var(--reader-line-height, 2.05);
+  line-height: var(--reader-line-height, 1.6);
   opacity: var(--japanese-opacity, 0.6);
 }
 
@@ -675,6 +688,10 @@ rt {
 .divider-block--plain span {
   color: var(--muted);
   font-size: 9px;
+}
+
+.spacer-block {
+  height: calc(var(--reader-line-box, 30.4px) + var(--reader-paragraph-spacing, 1em));
 }
 
 .book-end {

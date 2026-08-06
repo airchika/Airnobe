@@ -11,6 +11,7 @@ import { readReadingState, writeReadingState } from "./reading-state-store.js";
 import {
   findExactDuplicate,
   findProbableDuplicates,
+  deleteLibraryEntryAtomically,
   readLibraryIndex,
   updateLibraryEntry,
   writeLibraryIndexAtomically,
@@ -227,6 +228,35 @@ async function updateLibraryBook(bookId: string, request: IncomingMessage, respo
   sendJson(response, 200, { ...updated.entry, readingProgress });
 }
 
+async function reimportStoredBook(bookId: string, response: ServerResponse): Promise<void> {
+  const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
+  const entry = index.books.find((candidate) => candidate.id === bookId);
+  if (!entry) throw new HttpError(404, "书籍不存在。");
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFile(join(libraryBookDirectory(bookId), "source.epub"));
+  } catch {
+    throw new HttpError(404, "保存的原始 EPUB 不存在，无法重新导入。");
+  }
+  const sourceSha256 = createHash("sha256").update(bytes).digest("hex");
+  if (sourceSha256 !== entry.sourceSha256) throw new HttpError(409, "保存的原始 EPUB 与书库记录不一致。");
+  const result = await importLibraryBook({
+    libraryDirectory: LIBRARY_DIRECTORY,
+    bytes,
+    fileName: entry.sourceFileName,
+    replaceBookId: bookId,
+  });
+  sendJson(response, 200, {
+    bookId,
+    ...(result.annotationError ? { warning: `重新导入成功，但程序注音失败，只能打开基础版本：${result.annotationError}` } : {}),
+  });
+}
+
+async function deleteStoredBook(bookId: string, response: ServerResponse): Promise<void> {
+  if (!await deleteLibraryEntryAtomically(LIBRARY_DIRECTORY, bookId)) throw new HttpError(404, "书籍不存在。");
+  sendJson(response, 200, { deletedBookId: bookId });
+}
+
 async function sendBookBundle(bookId: string, response: ServerResponse): Promise<void> {
   const directory = libraryBookDirectory(bookId);
   const book = await readBook(directory);
@@ -342,6 +372,15 @@ function localBookApi(): Plugin {
           const libraryBookMatch = /^\/api\/library\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
           if (request.method === "PATCH" && libraryBookMatch) {
             await enqueueMutation(() => updateLibraryBook(libraryBookMatch[1] as string, request, response));
+            return;
+          }
+          if (request.method === "DELETE" && libraryBookMatch) {
+            await enqueueMutation(() => deleteStoredBook(libraryBookMatch[1] as string, response));
+            return;
+          }
+          const reimportBookMatch = /^\/api\/library\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/reimport$/i.exec(url.pathname);
+          if (request.method === "POST" && reimportBookMatch) {
+            await enqueueMutation(() => reimportStoredBook(reimportBookMatch[1] as string, response));
             return;
           }
           if (request.method === "GET" && url.pathname === "/api/settings") {

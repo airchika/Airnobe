@@ -32,7 +32,7 @@ export interface ShortcutBinding {
 }
 
 export interface ReaderSettings {
-  version: 5;
+  version: 6;
   navigation: {
     textSteps: number;
   };
@@ -47,6 +47,7 @@ export interface ReaderAppearance {
     fontSize: number;
     fontWeight: 400 | 600;
     lineHeight: number;
+    paragraphSpacing: number;
     columnWidth: number;
     japaneseOpacity: number;
   };
@@ -59,7 +60,7 @@ export interface ReaderAppearance {
 
 export const DEFAULT_READER_APPEARANCE: ReaderAppearance = {
   themeId: DEFAULT_THEME_ID,
-  typography: { fontSize: 19, fontWeight: 400, lineHeight: 2.05, columnWidth: 760, japaneseOpacity: 0.6 },
+  typography: { fontSize: 19, fontWeight: 400, lineHeight: 1.6, paragraphSpacing: 1, columnWidth: 760, japaneseOpacity: 0.6 },
   defaults: { showJapanese: false, showAssistedRuby: false, showKatakanaRomaji: false },
 };
 
@@ -78,7 +79,7 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
 };
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
-  version: 5,
+  version: 6,
   navigation: {
     textSteps: 2,
   },
@@ -103,7 +104,7 @@ function finiteRange(value: unknown, minimum: number, maximum: number): value is
   return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
 }
 
-export function parseReaderAppearance(value: unknown): ReaderAppearance | undefined {
+function parseAppearance(value: unknown, legacyV5 = false): ReaderAppearance | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
   const typography = typeof record.typography === "object" && record.typography !== null
@@ -115,7 +116,8 @@ export function parseReaderAppearance(value: unknown): ReaderAppearance | undefi
   if (!isThemeId(record.themeId) || !typography || !defaults) return undefined;
   if (!Number.isInteger(typography.fontSize) || !finiteRange(typography.fontSize, 14, 30)) return undefined;
   if (typography.fontWeight !== 400 && typography.fontWeight !== 600) return undefined;
-  if (!finiteRange(typography.lineHeight, 1.75, 2.6)) return undefined;
+  if (!finiteRange(typography.lineHeight, legacyV5 ? 1.75 : 1.4, legacyV5 ? 2.6 : 2.2)) return undefined;
+  if (!legacyV5 && !finiteRange(typography.paragraphSpacing, 0, 2)) return undefined;
   if (!Number.isInteger(typography.columnWidth) || !finiteRange(typography.columnWidth, 520, 1200)) return undefined;
   if (!finiteRange(typography.japaneseOpacity, 0.2, 1)) return undefined;
   if (typeof defaults.showJapanese !== "boolean" || typeof defaults.showAssistedRuby !== "boolean" || typeof defaults.showKatakanaRomaji !== "boolean") return undefined;
@@ -124,7 +126,10 @@ export function parseReaderAppearance(value: unknown): ReaderAppearance | undefi
     typography: {
       fontSize: typography.fontSize,
       fontWeight: typography.fontWeight,
-      lineHeight: typography.lineHeight,
+      lineHeight: legacyV5
+        ? typography.lineHeight === 2.05 ? 1.6 : Math.min(2.2, Math.max(1.4, typography.lineHeight))
+        : typography.lineHeight,
+      paragraphSpacing: legacyV5 ? 1 : typography.paragraphSpacing as number,
       columnWidth: typography.columnWidth,
       japaneseOpacity: typography.japaneseOpacity,
     },
@@ -134,6 +139,10 @@ export function parseReaderAppearance(value: unknown): ReaderAppearance | undefi
       showKatakanaRomaji: defaults.showKatakanaRomaji,
     },
   };
+}
+
+export function parseReaderAppearance(value: unknown): ReaderAppearance | undefined {
+  return parseAppearance(value);
 }
 
 function parseShortcutBinding(value: unknown): ShortcutBinding | undefined {
@@ -215,7 +224,7 @@ export function parseReaderSettings(value: unknown): ReaderSettings | undefined 
     const legacyShortcuts = parseShortcutsForActions(record.shortcuts, V2_SHORTCUT_ACTIONS);
     if (!legacyShortcuts) return undefined;
     return {
-      version: 5,
+      version: 6,
       navigation: { textSteps: navigation.textSteps },
       shortcuts: migrateV3Shortcuts({ ...legacyShortcuts, toggleToc: migratedTocBinding(legacyShortcuts) }),
       pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
@@ -227,20 +236,24 @@ export function parseReaderSettings(value: unknown): ReaderSettings | undefined 
     const shortcuts = parseShortcutsForActions(record.shortcuts, V3_SHORTCUT_ACTIONS);
     if (!shortcuts) return undefined;
     return {
-      version: 5,
+      version: 6,
       navigation: { textSteps: navigation.textSteps },
       shortcuts: migrateV3Shortcuts(shortcuts),
       pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
       appearance: structuredClone(DEFAULT_READER_APPEARANCE),
     };
   }
-  if (record.version !== 4 && record.version !== 5) return undefined;
+  if (record.version !== 4 && record.version !== 5 && record.version !== 6) return undefined;
   if (!isNavigationStepCount(navigation.textSteps)) return undefined;
   const shortcuts = parseShortcutsForActions(record.shortcuts, SHORTCUT_ACTIONS);
-  const appearance = record.version === 5 ? parseReaderAppearance(record.appearance) : structuredClone(DEFAULT_READER_APPEARANCE);
+  const appearance = record.version === 5
+    ? parseAppearance(record.appearance, true)
+    : record.version === 6
+      ? parseReaderAppearance(record.appearance)
+      : structuredClone(DEFAULT_READER_APPEARANCE);
   if (!shortcuts || !appearance) return undefined;
   return {
-    version: 5,
+    version: 6,
     navigation: { textSteps: navigation.textSteps },
     shortcuts,
     pageTransitions: typeof record.pageTransitions === "boolean" ? record.pageTransitions : false,
@@ -254,7 +267,7 @@ function cloneShortcuts(shortcuts: Record<ShortcutAction, ShortcutBinding>): Rec
 
 export function cloneReaderSettings(settings: ReaderSettings): ReaderSettings {
   return {
-    version: 5,
+    version: 6,
     navigation: { ...settings.navigation },
     shortcuts: cloneShortcuts(settings.shortcuts),
     pageTransitions: settings.pageTransitions,

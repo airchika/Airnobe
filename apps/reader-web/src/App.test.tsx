@@ -137,6 +137,40 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "重复书籍" })).not.toBeInTheDocument();
   });
 
+  it("reimports from the stored EPUB and confirms permanent deletion", async () => {
+    const user = userEvent.setup();
+    let libraryReads = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/library") {
+        libraryReads += 1;
+        return json({ version: 1, books: libraryReads < 3 ? [libraryBook] : [] });
+      }
+      if (url === `/api/library/books/${bookId}/reimport` && init?.method === "POST") return json({ bookId });
+      if (url === `/api/library/books/${bookId}` && init?.method === "DELETE") return json({ deletedBookId: bookId });
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "示例书籍" });
+
+    await user.click(screen.getByRole("button", { name: "重新导入" }));
+    expect(await screen.findByText("已使用保存的原始 EPUB 重新生成阅读数据。")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(`/api/library/books/${bookId}/reimport`, { method: "POST" });
+    await user.click(screen.getByRole("button", { name: "关闭提示" }));
+
+    await user.click(screen.getByRole("button", { name: "删除当前书籍" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除书籍" });
+    expect(dialog).toHaveTextContent("保存的原始 EPUB 都会被永久删除");
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "删除书籍" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "删除当前书籍" }));
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
+    expect(await screen.findByText("书库为空")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(`/api/library/books/${bookId}`, { method: "DELETE" });
+  });
+
   it("gives an error toast temporary keyboard priority and closes it with Space", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

@@ -20,6 +20,12 @@ describe("SettingsPanel", () => {
     />);
     fireEvent.change(screen.getByLabelText("字号滑块"), { target: { value: "23" } });
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ appearance: expect.objectContaining({ typography: expect.objectContaining({ fontSize: 23 }) }) }));
+    fireEvent.change(screen.getByLabelText("段内间距滑块"), { target: { value: "1.4" } });
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ appearance: expect.objectContaining({ typography: expect.objectContaining({ lineHeight: 1.4 }) }) }));
+    fireEvent.change(screen.getByLabelText("段落间距滑块"), { target: { value: "2" } });
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ appearance: expect.objectContaining({ typography: expect.objectContaining({ paragraphSpacing: 2 }) }) }));
+    expect(screen.getByLabelText("段内间距").parentElement).toHaveTextContent("倍");
+    expect(screen.getByLabelText("段落间距").parentElement).toHaveTextContent("em");
     fireEvent.click(screen.getByRole("button", { name: /显示日文/ }));
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ appearance: expect.objectContaining({ defaults: expect.objectContaining({ showJapanese: true }) }) }));
   });

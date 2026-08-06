@@ -91,6 +91,28 @@ export async function updateLibraryBook(
   return value;
 }
 
+export interface ReimportLibraryBookResult {
+  bookId: string;
+  warning?: string;
+}
+
+export async function reimportLibraryBook(bookId: string): Promise<ReimportLibraryBookResult> {
+  const value = await responseJson(await fetch(`/api/library/books/${bookId}/reimport`, { method: "POST" }));
+  if (typeof value !== "object" || value === null || (value as { bookId?: unknown }).bookId !== bookId) {
+    throw new Error("本地服务返回了无效的重新导入结果。");
+  }
+  const warning = (value as { warning?: unknown }).warning;
+  if (warning !== undefined && typeof warning !== "string") throw new Error("本地服务返回了无效的重新导入结果。");
+  return { bookId, ...(warning ? { warning } : {}) };
+}
+
+export async function deleteLibraryBook(bookId: string): Promise<void> {
+  const value = await responseJson(await fetch(`/api/library/books/${bookId}`, { method: "DELETE" }));
+  if (typeof value !== "object" || value === null || (value as { deletedBookId?: unknown }).deletedBookId !== bookId) {
+    throw new Error("本地服务返回了无效的删除结果。");
+  }
+}
+
 export function coverUrl(book: LibraryBook): string | undefined {
   return book.coverAssetId
     ? `/api/books/${book.id}/assets/${encodeURIComponent(book.coverAssetId)}`

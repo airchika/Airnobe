@@ -55,6 +55,7 @@ export interface ConversionState {
   warnings: ConversionWarning[];
   sourceRubyCount: number;
   textBlockCount: number;
+  spacerBlockCount: number;
   parallelBlockCount: number;
   unclassifiedTextCount: number;
   directions: Set<"zh-jp" | "jp-zh">;

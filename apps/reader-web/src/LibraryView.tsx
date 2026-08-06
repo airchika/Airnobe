@@ -13,8 +13,10 @@ interface LibraryViewProps {
   onSelect(bookId: string): void;
   onImport(): void;
   onOpenSettings?(): void;
-  onRead(bookId: string): void;
+  onRead(bookId: string, mode?: "continue" | "beginning"): void;
   onUpdate(bookId: string, patch: { collectionStatus?: CollectionStatus; note?: string }): Promise<void>;
+  onReimport?(bookId: string): void;
+  onDelete?(bookId: string): void;
   keyboardNavigationEnabled?: boolean;
 }
 
@@ -52,7 +54,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(bytes >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
 }
 
-export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenSettings, onRead, onUpdate, keyboardNavigationEnabled = true }: LibraryViewProps) {
+export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenSettings, onRead, onUpdate, onReimport = () => {}, onDelete = () => {}, keyboardNavigationEnabled = true }: LibraryViewProps) {
   const rootRef = useRef<HTMLElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const noteEntryRef = useRef<HTMLLabelElement>(null);
@@ -240,8 +242,13 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenS
                 />
               </label>
               <div className="library-detail-actions">
-                <button className="primary-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="3" onClick={() => onRead(selected.id)}>阅读</button>
+                <button className="primary-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="3" onClick={() => onRead(selected.id, "continue")}>继续阅读</button>
+                <button className="secondary-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="3" onClick={() => onRead(selected.id, "beginning")}>从头阅读</button>
                 <a className="secondary-action" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="3" href={sourceEpubUrl(selected)} download={selected.sourceFileName}>导出 EPUB</a>
+              </div>
+              <div className="library-detail-actions library-detail-actions--maintenance">
+                <button className="secondary-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="4" onClick={() => onReimport(selected.id)}>重新导入</button>
+                <button className="secondary-action danger-action" type="button" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="4" onClick={() => onDelete(selected.id)}>删除当前书籍</button>
               </div>
             </>
           )}

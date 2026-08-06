@@ -100,10 +100,34 @@ describe("LibraryView", () => {
     const exportLink = screen.getByRole("link", { name: "导出 EPUB" });
     expect(exportLink).toHaveAttribute("href", `/api/books/${second.id}/source`);
     expect(exportLink).toHaveAttribute("download", "新书.epub");
-    await user.click(screen.getByRole("button", { name: "阅读" }));
-    expect(onRead).toHaveBeenCalledWith(second.id);
+    await user.click(screen.getByRole("button", { name: "继续阅读" }));
+    expect(onRead).toHaveBeenCalledWith(second.id, "continue");
+    await user.click(screen.getByRole("button", { name: "从头阅读" }));
+    expect(onRead).toHaveBeenCalledWith(second.id, "beginning");
     await user.dblClick(within(screen.getByLabelText("书籍列表")).getByRole("button", { name: /旧书/ }));
     expect(onRead).toHaveBeenLastCalledWith(first.id);
+  });
+
+  it("offers stored-source reimport and current-book deletion", async () => {
+    const user = userEvent.setup();
+    const onReimport = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <LibraryView
+        books={[second]}
+        selectedBookId={second.id}
+        onSelect={() => {}}
+        onImport={() => {}}
+        onRead={() => {}}
+        onUpdate={async () => {}}
+        onReimport={onReimport}
+        onDelete={onDelete}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "重新导入" }));
+    expect(onReimport).toHaveBeenCalledWith(second.id);
+    await user.click(screen.getByRole("button", { name: "删除当前书籍" }));
+    expect(onDelete).toHaveBeenCalledWith(second.id);
   });
 
   it("navigates the three-column library with WASD and opens the focused book with Space", async () => {

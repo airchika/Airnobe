@@ -17,7 +17,8 @@ interface SettingsPanelProps {
 type NumberKey = keyof ReaderAppearance["typography"];
 const NUMBER_FIELDS: Array<{ key: NumberKey; label: string; min: number; max: number; step: number; suffix: string }> = [
   { key: "fontSize", label: "字号", min: 14, max: 30, step: 1, suffix: "px" },
-  { key: "lineHeight", label: "行距", min: 1.75, max: 2.6, step: 0.05, suffix: "" },
+  { key: "lineHeight", label: "段内间距", min: 1.4, max: 2.2, step: 0.05, suffix: "倍" },
+  { key: "paragraphSpacing", label: "段落间距", min: 0, max: 2, step: 0.1, suffix: "em" },
   { key: "columnWidth", label: "栏宽", min: 520, max: 1200, step: 10, suffix: "px" },
   { key: "japaneseOpacity", label: "日文透明度", min: 0.2, max: 1, step: 0.05, suffix: "" },
 ];
@@ -157,16 +158,16 @@ export function SettingsPanel({ settings, themes, onPreview, onSave, onImport, o
               <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={numberInputs[field.key]} onFocus={() => setEditing(true)} onBlur={() => { setEditing(false); setNumberInputs((current) => ({ ...current, [field.key]: String(draftRef.current.appearance.typography[field.key]) })); }} onChange={(event) => updateNumberInput(field.key, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setNumberInputs((current) => ({ ...current, [field.key]: String(draftRef.current.appearance.typography[field.key]) })); event.currentTarget.blur(); } }} />{field.suffix}
             </span>
           </label>)}
-          <div className="settings-choice-row"><span>字重</span>{([400, 600] as const).map((weight) => <button key={weight} type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="12" aria-pressed={draft.appearance.typography.fontWeight === weight} onClick={() => update({ ...draft.appearance, typography: { ...draft.appearance.typography, fontWeight: weight } })}>{weight === 400 ? "正常 400" : "半粗 600"}</button>)}</div>
+          <div className="settings-choice-row"><span>字重</span>{([400, 600] as const).map((weight) => <button key={weight} type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="13" aria-pressed={draft.appearance.typography.fontWeight === weight} onClick={() => update({ ...draft.appearance, typography: { ...draft.appearance.typography, fontWeight: weight } })}>{weight === 400 ? "正常 400" : "半粗 600"}</button>)}</div>
         </section>
         <section>
           <h3>打开书籍时</h3>
-          {([ ["showJapanese", "显示日文"], ["showAssistedRuby", "显示辅助注音"], ["showKatakanaRomaji", "显示片假名罗马音"] ] as const).map(([key, label], index) => <button className="settings-toggle" key={key} type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row={String(index + 13)} aria-pressed={draft.appearance.defaults[key]} onClick={() => update({ ...draft.appearance, defaults: { ...draft.appearance.defaults, [key]: !draft.appearance.defaults[key] } })}><span>{label}</span><b>{draft.appearance.defaults[key] ? "开" : "关"}</b></button>)}
+          {([ ["showJapanese", "显示日文"], ["showAssistedRuby", "显示辅助注音"], ["showKatakanaRomaji", "显示片假名罗马音"] ] as const).map(([key, label], index) => <button className="settings-toggle" key={key} type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row={String(index + 14)} aria-pressed={draft.appearance.defaults[key]} onClick={() => update({ ...draft.appearance, defaults: { ...draft.appearance.defaults, [key]: !draft.appearance.defaults[key] } })}><span>{label}</span><b>{draft.appearance.defaults[key] ? "开" : "关"}</b></button>)}
         </section>
-        <button type="button" className="settings-reset" data-spatial-item data-spatial-zone="settings" data-spatial-row="16" onClick={() => setConfirmReset(true)}>恢复阅读外观默认值</button>
+        <button type="button" className="settings-reset" data-spatial-item data-spatial-zone="settings" data-spatial-row="17" onClick={() => setConfirmReset(true)}>恢复阅读外观默认值</button>
         {localError && <p className="settings-error" role="alert">{localError}</p>}
-        {confirmReset && <div className="settings-confirm"><p>只重置主题、排版和默认显示状态。</p><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="17" onClick={() => { setConfirmReset(false); update(structuredClone(DEFAULT_READER_APPEARANCE)); }}>确认恢复</button><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="17" onClick={() => setConfirmReset(false)}>取消</button></div>}
-        {replaceTheme && <div className="settings-confirm"><p>替换同名自定义主题“{replaceTheme.name}”？</p><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="17" onClick={() => { const theme = replaceTheme; setReplaceTheme(undefined); void performImport(theme); }}>替换</button><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="17" onClick={() => setReplaceTheme(undefined)}>取消</button></div>}
+        {confirmReset && <div className="settings-confirm"><p>只重置主题、排版和默认显示状态。</p><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="18" onClick={() => { setConfirmReset(false); update(structuredClone(DEFAULT_READER_APPEARANCE)); }}>确认恢复</button><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="18" onClick={() => setConfirmReset(false)}>取消</button></div>}
+        {replaceTheme && <div className="settings-confirm"><p>替换同名自定义主题“{replaceTheme.name}”？</p><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="18" onClick={() => { const theme = replaceTheme; setReplaceTheme(undefined); void performImport(theme); }}>替换</button><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-row="18" onClick={() => setReplaceTheme(undefined)}>取消</button></div>}
       </div>
     </div>
   );

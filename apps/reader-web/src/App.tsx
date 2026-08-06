@@ -13,7 +13,9 @@ import {
 } from "./book-source.js";
 import { createDemoBook } from "./demo-book.js";
 import {
+  deleteLibraryBook,
   loadLibrary,
+  reimportLibraryBook,
   updateLibraryBook,
   type CollectionStatus,
   type LibraryBook,
@@ -25,7 +27,7 @@ import {
   saveReaderSettings,
   type ReaderSettings,
 } from "./reader-settings.js";
-import { readingProgressSummary, type ReadingPosition } from "./reading-state.js";
+import { EMPTY_READING_STATE, readingProgressSummary, type ReadingPosition } from "./reading-state.js";
 import { useSpatialNavigation } from "./spatial-navigation.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { builtinThemeOptions, importTheme as importCustomTheme, loadThemes, type AvailableTheme } from "./theme-client.js";
@@ -46,6 +48,7 @@ export function App() {
     candidates: LibraryBookSummary[];
   }>();
   const [selectedDuplicateId, setSelectedDuplicateId] = useState<string>();
+  const [deletePrompt, setDeletePrompt] = useState<{ bookId: string; title: string }>();
   const [settings, setSettings] = useState<ReaderSettings>(() => cloneReaderSettings(DEFAULT_READER_SETTINGS));
   const [themes, setThemes] = useState<AvailableTheme[]>(builtinThemeOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -156,11 +159,13 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "instant" });
   };
 
-  const readLibraryBook = async (bookId: string): Promise<void> => {
+  const readLibraryBook = async (bookId: string, mode: "continue" | "beginning" = "continue"): Promise<void> => {
     setLoading("正在打开…");
     setError(undefined);
     try {
-      installBook(await loadBookFromApi(bookId));
+      const book = await loadBookFromApi(bookId);
+      if (mode === "beginning") book.readingState = structuredClone(EMPTY_READING_STATE);
+      installBook(book);
     } catch (loadError) {
       setError((loadError as Error).message);
     } finally {
@@ -230,8 +235,41 @@ export function App() {
     }
   };
 
+  const reimportBook = async (bookId: string): Promise<void> => {
+    setLoading("正在重新导入…");
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const result = await reimportLibraryBook(bookId);
+      await refreshLibrary(bookId);
+      setNotice(result.warning ?? "已使用保存的原始 EPUB 重新生成阅读数据。");
+    } catch (reimportError) {
+      setError((reimportError as Error).message);
+    } finally {
+      setLoading(undefined);
+    }
+  };
+
+  const confirmDeleteBook = async (): Promise<void> => {
+    const prompt = deletePrompt;
+    if (!prompt) return;
+    setDeletePrompt(undefined);
+    setLoading("正在删除…");
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      await deleteLibraryBook(prompt.bookId);
+      await refreshLibrary();
+      setNotice(`已删除“${prompt.title || "未命名书籍"}”。`);
+    } catch (deleteError) {
+      setError((deleteError as Error).message);
+    } finally {
+      setLoading(undefined);
+    }
+  };
+
   const overlayMessage = loading ?? (libraryLoading && !loaded ? "正在加载书库…" : undefined);
-  const interactiveOverlay = settingsOpen ? "settings" : duplicatePrompt ? "duplicate" : error ? "error" : notice ? "notice" : undefined;
+  const interactiveOverlay = settingsOpen ? "settings" : duplicatePrompt ? "duplicate" : deletePrompt ? "delete" : error ? "error" : notice ? "notice" : undefined;
 
   const activateOverlayItem = useCallback((element: HTMLElement): boolean => {
     if (element.dataset.spatialAction !== "edit-duplicate-select") return false;
@@ -301,8 +339,13 @@ export function App() {
             onSelect={(bookId) => setSelectedBookId(bookId || undefined)}
             onImport={openEpubPicker}
             onOpenSettings={() => setSettingsOpen(true)}
-            onRead={(bookId) => void readLibraryBook(bookId)}
+            onRead={(bookId, mode) => void readLibraryBook(bookId, mode)}
             onUpdate={updateBook}
+            onReimport={(bookId) => void reimportBook(bookId)}
+            onDelete={(bookId) => {
+              const book = libraryBooks.find((candidate) => candidate.id === bookId);
+              if (book) setDeletePrompt({ bookId, title: book.title });
+            }}
             keyboardNavigationEnabled={keyboardNavigationEnabled}
           />}
       {settingsOpen && <SettingsPanel
@@ -372,13 +415,25 @@ export function App() {
           </div>
         </div>
       )}
-      {!error && notice && !duplicatePrompt && (
+      {deletePrompt && !duplicatePrompt && (
+        <div className="reader-menu-backdrop">
+          <div className="duplicate-dialog" role="dialog" aria-modal="true" aria-label="删除书籍">
+            <strong>删除当前书籍？</strong>
+            <span>“{deletePrompt.title || "未命名书籍"}”的阅读数据和保存的原始 EPUB 都会被永久删除。</span>
+            <div className="duplicate-dialog-actions">
+              <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="0" className="danger-action" onClick={() => void confirmDeleteBook()}>确认删除</button>
+              <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="0" className="secondary-action" onClick={() => setDeletePrompt(undefined)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {!error && notice && !duplicatePrompt && !deletePrompt && (
         <div className="notice-toast" role="status">
           <span>{notice}</span>
           <button type="button" data-spatial-item data-spatial-zone="toast" data-spatial-zone-order="0" data-spatial-row="0" onClick={() => setNotice(undefined)} aria-label="关闭提示">×</button>
         </div>
       )}
-      {error && !duplicatePrompt && (
+      {error && !duplicatePrompt && !deletePrompt && (
         <div className="error-toast" role="alert">
           <strong>无法打开</strong>
           <span>{error}</span>

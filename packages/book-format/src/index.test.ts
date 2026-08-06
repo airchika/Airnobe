@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inlinePlainText, InlineNodeSchema } from "./index.js";
+import { BlockNodeSchema, inlinePlainText, InlineNodeSchema } from "./index.js";
 
 describe("book format", () => {
   it("derives plain text from structured ruby without storing duplicate HTML", () => {
@@ -36,5 +36,13 @@ describe("book format", () => {
       readingType: "romaji",
       segments: [{ base: "コンピューター", reading: "konpyūtā" }],
     })).toMatchObject({ readingType: "romaji" });
+  });
+
+  it("accepts an explicit spacer block without text payload", () => {
+    expect(BlockNodeSchema.parse({
+      id: "spacer-1",
+      type: "spacer",
+      sourceRef: { sourcePath: "Text/chapter.xhtml", nodeIndex: 2 },
+    })).toMatchObject({ type: "spacer" });
   });
 });

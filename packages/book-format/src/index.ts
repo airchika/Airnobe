@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const AIRNOBE_FORMAT = "airnobe-book" as const;
-export const AIRNOBE_FORMAT_VERSION = 3 as const;
+export const AIRNOBE_FORMAT_VERSION = 4 as const;
 
 function isPortableRelativePath(value: string): boolean {
   return !value.includes("\\")
@@ -119,10 +119,18 @@ export const DividerBlockSchema = z.object({
 }).strict();
 export type DividerBlock = z.infer<typeof DividerBlockSchema>;
 
+export const SpacerBlockSchema = z.object({
+  id: z.string().min(1),
+  type: z.literal("spacer"),
+  sourceRef: SourceRefSchema,
+}).strict();
+export type SpacerBlock = z.infer<typeof SpacerBlockSchema>;
+
 export const BlockNodeSchema = z.discriminatedUnion("type", [
   TextBlockSchema,
   ImageBlockSchema,
   DividerBlockSchema,
+  SpacerBlockSchema,
 ]);
 export type BlockNode = z.infer<typeof BlockNodeSchema>;
 
@@ -236,6 +244,7 @@ export const ConversionReportSchema = z.object({
     spineDocumentCount: z.number().int().nonnegative(),
     outputDocumentCount: z.number().int().nonnegative(),
     textBlockCount: z.number().int().nonnegative(),
+    spacerBlockCount: z.number().int().nonnegative(),
     parallelBlockCount: z.number().int().nonnegative(),
     sourceRubyCount: z.number().int().nonnegative(),
     reusedRubyCount: z.number().int().nonnegative(),

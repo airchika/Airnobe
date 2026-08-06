@@ -2,6 +2,7 @@ import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { AIRNOBE_FORMAT_VERSION } from "@airnobe/book-format";
 import { importLibraryBook, parseBaseSnapshot } from "./library-import.js";
 import { readLibraryIndex } from "./library-store.js";
 
@@ -76,7 +77,7 @@ describe.skipIf(!runReal)("real EPUB library import", () => {
     const derivedReport = JSON.parse(await readFile(join(japaneseDirectory, "report.json"), "utf8")) as {
       metrics: { katakanaRomajiCount: number };
     };
-    expect(derivedBook.version).toBe(3);
+    expect(derivedBook.version).toBe(AIRNOBE_FORMAT_VERSION);
     expect(derivedBook.derivation?.romanization).toMatchObject({ system: "modified-hepburn", longVowels: "macron" });
     expect(derivedReport.metrics.katakanaRomajiCount).toBeGreaterThan(0);
     const snapshot = parseBaseSnapshot(await readFile(join(japaneseDirectory, "base.snapshot.json.gz")));

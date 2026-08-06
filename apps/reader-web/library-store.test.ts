@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createDemoBook } from "./src/demo-book.js";
 import {
   createLibraryEntry,
+  deleteLibraryEntryAtomically,
   emptyLibraryIndex,
   findExactDuplicate,
   findProbableDuplicates,
@@ -110,5 +111,19 @@ describe("library store", () => {
     });
     expect(result?.index.books).toEqual([result?.entry]);
     expect(updateLibraryEntry({ version: 1, books: [original] }, crypto.randomUUID(), { note: "missing" })).toBeUndefined();
+  });
+
+  it("removes the index entry and stored book directory together", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "airnobe-library-delete-"));
+    directories.push(directory);
+    const bookDirectory = join(directory, "books", id);
+    await mkdir(bookDirectory, { recursive: true });
+    await writeFile(join(bookDirectory, "source.epub"), "epub");
+    await writeLibraryIndexAtomically(join(directory, "library.json"), { version: 1, books: [entry()] });
+
+    await expect(deleteLibraryEntryAtomically(directory, id)).resolves.toMatchObject({ id });
+    await expect(readLibraryIndex(join(directory, "library.json"))).resolves.toEqual({ version: 1, books: [] });
+    await expect(access(bookDirectory)).rejects.toBeTruthy();
+    await expect(deleteLibraryEntryAtomically(directory, id)).resolves.toBeUndefined();
   });
 });

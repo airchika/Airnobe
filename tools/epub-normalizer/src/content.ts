@@ -41,6 +41,12 @@ interface Candidate {
   role: "paragraph" | "heading" | "caption";
 }
 
+interface StandaloneItem {
+  element: Element;
+  nodeIndex: number;
+  kind: "media" | "spacer";
+}
+
 interface InlineContext {
   sourcePath: string;
   nodeIndex: number;
@@ -176,10 +182,35 @@ function isPlainTranslation(element: Element): boolean {
     && normalizedText(element).length > 0;
 }
 
-function collectCandidates(document: Document): { candidates: Candidate[]; standalone: Array<{ element: Element; nodeIndex: number }> } {
+const EMPTY_PARAGRAPH_INLINE_NAMES = new Set([
+  "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "del", "em", "font", "i", "ins", "mark", "q", "s", "small", "span", "strong", "sub", "sup", "u", "wbr",
+]);
+
+function isExplicitEmptyParagraph(element: Element): boolean {
+  if (localName(element) !== "p" || normalizedText(element).length > 0) return false;
+  const isEmptyContent = (node: Node): boolean => {
+    if (node.nodeType === 3 || node.nodeType === 4) return (node.nodeValue ?? "").trim().length === 0;
+    if (node.nodeType === 8) return true;
+    if (node.nodeType !== 1) return false;
+    const name = localName(node);
+    if (!EMPTY_PARAGRAPH_INLINE_NAMES.has(name)) return false;
+    for (let index = 0; index < node.childNodes.length; index += 1) {
+      const child = node.childNodes.item(index);
+      if (child && !isEmptyContent(child)) return false;
+    }
+    return true;
+  };
+  for (let index = 0; index < element.childNodes.length; index += 1) {
+    const child = element.childNodes.item(index);
+    if (child && !isEmptyContent(child)) return false;
+  }
+  return true;
+}
+
+function collectCandidates(document: Document): { candidates: Candidate[]; standalone: StandaloneItem[] } {
   const body = descendantElements(document, "body")[0] ?? document.documentElement;
   const candidates: Candidate[] = [];
-  const standalone: Array<{ element: Element; nodeIndex: number }> = [];
+  const standalone: StandaloneItem[] = [];
   let nodeIndex = 0;
   const inlineNames = new Set(["a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "em", "i", "q", "rb", "rp", "rt", "rtc", "ruby", "small", "span", "strong", "sub", "sup", "u", "wbr"]);
   const visit = (element: Element): void => {
@@ -188,8 +219,10 @@ function collectCandidates(document: Document): { candidates: Candidate[]; stand
     if (["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "figcaption"].includes(name)) {
       const text = normalizedText(element);
       const images = descendantElements(element, "img");
-      if (!text && images.length > 0) {
-        for (const image of images) standalone.push({ element: image, nodeIndex: nodeIndex++ });
+      if (isExplicitEmptyParagraph(element)) {
+        standalone.push({ element, nodeIndex: nodeIndex++, kind: "spacer" });
+      } else if (!text && images.length > 0) {
+        for (const image of images) standalone.push({ element: image, nodeIndex: nodeIndex++, kind: "media" });
       } else if (text || images.length > 0) {
         candidates.push({
           element,
@@ -201,7 +234,7 @@ function collectCandidates(document: Document): { candidates: Candidate[]; stand
       return;
     }
     if (name === "img" || name === "svg" || name === "hr") {
-      standalone.push({ element, nodeIndex: nodeIndex++ });
+      standalone.push({ element, nodeIndex: nodeIndex++, kind: "media" });
       return;
     }
     let inlineRun: Node[] = [];
@@ -522,10 +555,18 @@ export async function parseContentDocument(
   for (let index = 0; index < standalone.length; index += 1) {
     const item = standalone[index];
     if (!item) continue;
-    const { element, nodeIndex } = item;
+    const { element, nodeIndex, kind } = item;
     const name = localName(element);
     const ref: SourceRef = { sourcePath, nodeIndex, ...(attr(element, "id") ? { elementId: attr(element, "id") } : {}) };
     const blockId = `${documentId}-media-${String(nodeIndex).padStart(6, "0")}`;
+    if (kind === "spacer") {
+      blocks.push({ id: blockId, type: "spacer", sourceRef: ref });
+      for (const current of [element, ...descendantElements(element)]) {
+        const elementId = attr(current, "id");
+        if (elementId) anchors[elementId] = blockId;
+      }
+      continue;
+    }
     if (name === "hr") {
       blocks.push({ id: blockId, type: "divider", sourceRef: ref });
       continue;
@@ -570,7 +611,8 @@ export async function parseContentDocument(
   let role = roleFromPath(sourcePath, properties);
   if (role === "unknown") {
     const hasText = blocks.some((block) => block.type === "text");
-    const imageOnly = blocks.length > 0 && blocks.every((block) => block.type === "image" || block.type === "divider");
+    const meaningfulBlocks = blocks.filter((block) => block.type !== "spacer");
+    const imageOnly = meaningfulBlocks.length > 0 && meaningfulBlocks.every((block) => block.type === "image" || block.type === "divider");
     role = imageOnly ? "illustration" : hasText ? "chapter" : "unknown";
   }
   blocks.sort((left, right) => {
@@ -580,6 +622,43 @@ export async function parseContentDocument(
     };
     return blockIndex(left) - blockIndex(right);
   });
+  const meaningfulIndices = blocks.flatMap((block, index) => block.type === "spacer" ? [] : [index]);
+  const firstMeaningfulIndex = meaningfulIndices[0];
+  const lastMeaningfulIndex = meaningfulIndices.at(-1);
+  if (firstMeaningfulIndex === undefined || lastMeaningfulIndex === undefined) {
+    blocks.length = 0;
+    for (const key of Object.keys(anchors)) delete anchors[key];
+  } else {
+    const normalizedBlocks: BookDocument["blocks"] = [];
+    const redirectedBlockIds = new Map<string, string>();
+    const firstBlockId = blocks[firstMeaningfulIndex]?.id as string;
+    const lastBlockId = blocks[lastMeaningfulIndex]?.id as string;
+    let retainedSpacerId: string | undefined;
+    for (let index = 0; index < blocks.length; index += 1) {
+      const block = blocks[index];
+      if (!block) continue;
+      if (block.type !== "spacer") {
+        normalizedBlocks.push(block);
+        retainedSpacerId = undefined;
+        continue;
+      }
+      if (index < firstMeaningfulIndex) {
+        redirectedBlockIds.set(block.id, firstBlockId);
+      } else if (index > lastMeaningfulIndex) {
+        redirectedBlockIds.set(block.id, lastBlockId);
+      } else if (retainedSpacerId) {
+        redirectedBlockIds.set(block.id, retainedSpacerId);
+      } else {
+        normalizedBlocks.push(block);
+        retainedSpacerId = block.id;
+      }
+    }
+    blocks.splice(0, blocks.length, ...normalizedBlocks);
+    for (const [fragmentId, blockId] of Object.entries(anchors)) {
+      anchors[fragmentId] = redirectedBlockIds.get(blockId) ?? blockId;
+    }
+  }
+  state.spacerBlockCount += blocks.filter((block) => block.type === "spacer").length;
   const fallbackBlockId = blocks[0]?.id;
   if (fallbackBlockId) {
     for (const element of descendantElements(dom)) {

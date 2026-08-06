@@ -20,6 +20,7 @@ run("local real EPUB regression", () => {
       const result = await convertEpubBytes(await readFile(resolve(repository, name)), name);
       expect(result.report.metrics.parallelBlockCount, name).toBe(expectedPairs);
       expect(result.report.metrics.sourceRubyCount, name).toBe(expectedRubies);
+      expect(result.report.metrics.spacerBlockCount, name).toBeGreaterThan(0);
       const illustrationPaths = name === "kokorokonekuto.epub"
         ? ["text/part0000.html", "text/part0001.html", "text/part0002.html", "text/part0003.html", "text/part0004.html"]
         : name === "mimozanoGaoBai.epub"
@@ -41,6 +42,7 @@ run("local real EPUB regression", () => {
     const result = await convertEpubBytes(await readFile(resolve(repository, "zjws.epub")), "zjws.epub");
     expect(result.report.metrics.spineDocumentCount).toBe(result.report.metrics.outputDocumentCount + 1);
     expect(result.report.metrics.textBlockCount).toBe(9_818);
+    expect(result.report.metrics.spacerBlockCount).toBeGreaterThan(0);
     expect(result.report.warnings.some((warning) => warning.code.includes("UNPAIRED"))).toBe(false);
   }, 30_000);
 });

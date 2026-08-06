@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { join, resolve } from "node:path";
 import type { BookManifest } from "@airnobe/book-format";
 
 export const LIBRARY_INDEX_VERSION = 1 as const;
@@ -112,6 +113,35 @@ export async function writeLibraryIndexAtomically(indexPath: string, index: Libr
     }
     throw new Error(`无法保存书库索引：${(error as Error).message}`);
   }
+}
+
+export async function deleteLibraryEntryAtomically(libraryDirectory: string, bookId: string): Promise<LibraryEntry | undefined> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) return undefined;
+  const root = resolve(libraryDirectory);
+  const indexPath = join(root, "library.json");
+  const index = await readLibraryIndex(indexPath);
+  const entry = index.books.find((candidate) => candidate.id === bookId);
+  if (!entry) return undefined;
+  const targetDirectory = join(root, "books", bookId);
+  const removedDirectory = join(root, "books", `.${bookId}.airnobe-delete-${randomUUID()}`);
+  let moved = false;
+  try {
+    try {
+      await rename(targetDirectory, removedDirectory);
+      moved = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await writeLibraryIndexAtomically(indexPath, {
+      version: index.version,
+      books: index.books.filter((candidate) => candidate.id !== bookId),
+    });
+  } catch (error) {
+    if (moved) await rename(removedDirectory, targetDirectory).catch(() => {});
+    throw error;
+  }
+  if (moved) await rm(removedDirectory, { recursive: true, force: true }).catch(() => {});
+  return entry;
 }
 
 function normalizedMetadata(value: string): string {

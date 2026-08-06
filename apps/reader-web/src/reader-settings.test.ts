@@ -4,7 +4,7 @@ import { DEFAULT_READER_APPEARANCE, DEFAULT_READER_SETTINGS, parseReaderSettings
 describe("reader settings", () => {
   it("uses one two-block navigation distance and eleven default shortcuts", () => {
     expect(DEFAULT_READER_SETTINGS).toEqual({
-      version: 5,
+      version: 6,
       navigation: { textSteps: 2 },
       shortcuts: {
         toggleJapanese: { code: "KeyQ" },
@@ -24,7 +24,7 @@ describe("reader settings", () => {
     });
   });
 
-  it("accepts valid v5 settings and optional single modifiers", () => {
+  it("accepts valid v6 settings and optional single modifiers", () => {
     const value = structuredClone(DEFAULT_READER_SETTINGS);
     value.navigation.textSteps = 9;
     value.shortcuts.topBackward = { code: "ArrowUp", modifier: "Control" };
@@ -42,7 +42,7 @@ describe("reader settings", () => {
       pageTransitions: true,
     });
     expect(migrated).toEqual({
-      version: 5,
+      version: 6,
       navigation: { textSteps: 4 },
       shortcuts: { ...legacyShortcuts, toggleMenu: { code: "Digit3" }, toggleToc: { code: "Digit2" } },
       pageTransitions: true,
@@ -50,14 +50,30 @@ describe("reader settings", () => {
     });
   });
 
-  it("migrates v4 and validates appearance ranges", () => {
+  it("migrates v4 and validates v6 appearance ranges", () => {
     const legacy = structuredClone(DEFAULT_READER_SETTINGS) as unknown as Record<string, unknown>;
     legacy.version = 4;
     delete legacy.appearance;
     expect(parseReaderSettings(legacy)?.appearance).toEqual(DEFAULT_READER_APPEARANCE);
     const invalid = structuredClone(DEFAULT_READER_SETTINGS);
-    invalid.appearance.typography.lineHeight = 1.5;
+    invalid.appearance.typography.lineHeight = 1.3;
     expect(parseReaderSettings(invalid)).toBeUndefined();
+    invalid.appearance.typography.lineHeight = 1.6;
+    invalid.appearance.typography.paragraphSpacing = 2.1;
+    expect(parseReaderSettings(invalid)).toBeUndefined();
+  });
+
+  it("migrates v5 line spacing and adds paragraph spacing", () => {
+    const legacy = structuredClone(DEFAULT_READER_SETTINGS) as unknown as { version: number; appearance: { typography: Record<string, number> } };
+    legacy.version = 5;
+    legacy.appearance.typography.lineHeight = 2.05;
+    delete legacy.appearance.typography.paragraphSpacing;
+    expect(parseReaderSettings(legacy)?.appearance.typography).toMatchObject({ lineHeight: 1.6, paragraphSpacing: 1 });
+
+    legacy.appearance.typography.lineHeight = 2.6;
+    expect(parseReaderSettings(legacy)?.appearance.typography.lineHeight).toBe(2.2);
+    legacy.appearance.typography.lineHeight = 1.9;
+    expect(parseReaderSettings(legacy)?.appearance.typography.lineHeight).toBe(1.9);
   });
 
   it("migrates the default v3 directory key to Digit2 and reserves Digit1 for the menu", () => {

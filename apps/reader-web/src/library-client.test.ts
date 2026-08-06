@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { coverUrl, loadLibrary, sourceEpubUrl, updateLibraryBook, type LibraryBook } from "./library-client.js";
+import { coverUrl, deleteLibraryBook, loadLibrary, reimportLibraryBook, sourceEpubUrl, updateLibraryBook, type LibraryBook } from "./library-client.js";
 
 const book: LibraryBook = {
   id: "01234567-89ab-4cde-8fab-0123456789ab",
@@ -44,5 +44,16 @@ describe("library client", () => {
   it("rejects malformed library responses", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ version: 1, books: [{ id: "bad" }] })));
     await expect(loadLibrary()).rejects.toThrow("书库响应不符合当前格式");
+  });
+
+  it("reimports and deletes a stored book through its stable library ID", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ bookId: book.id })));
+    await expect(reimportLibraryBook(book.id)).resolves.toEqual({ bookId: book.id });
+    expect(fetchMock).toHaveBeenLastCalledWith(`/api/library/books/${book.id}/reimport`, { method: "POST" });
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ deletedBookId: book.id })));
+    await expect(deleteLibraryBook(book.id)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenLastCalledWith(`/api/library/books/${book.id}`, { method: "DELETE" });
   });
 });

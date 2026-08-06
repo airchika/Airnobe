@@ -66,6 +66,18 @@ describe("furigana AST annotation", () => {
     expect(second.variants[0]?.content).toEqual([{ type: "ruby", segments: [{ base: "生", reading: "なま" }], origin: "reused", readingType: "kana" }]);
   });
 
+  it("preserves spacer blocks without annotating them", () => {
+    const document = documentWith([[{ type: "text", value: "日本" }]]);
+    document.blocks.unshift({
+      id: "spacer-0",
+      type: "spacer",
+      sourceRef: { sourcePath: "Text/test.xhtml", nodeIndex: 0 },
+    });
+    const spacer = structuredClone(document.blocks[0]);
+    annotateDocuments([document], { tokenize: () => [{ surface_form: "日本", reading: "ニホン" }] });
+    expect(document.blocks[0]).toEqual(spacer);
+  });
+
   it("reuses a complete multi-segment source base across whole token boundaries", () => {
     const tokenizer: TokenizerLike = {
       tokenize: (text) => text === "異世界"

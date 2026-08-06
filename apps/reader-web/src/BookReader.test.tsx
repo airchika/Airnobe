@@ -49,7 +49,7 @@ function openReaderMenu(): void {
   fireEvent.contextMenu(app);
 }
 
-function navigationRows(kinds: Array<"text" | "image" | "divider">): ReaderRow[] {
+function navigationRows(kinds: Array<"text" | "image" | "divider" | "spacer">): ReaderRow[] {
   return kinds.map((kind, index) => {
     const id = `navigation-${kind}-${index}`;
     const block: BlockNode = kind === "text"
@@ -74,9 +74,13 @@ function navigationRows(kinds: Array<"text" | "image" | "divider">): ReaderRow[]
             alt: "插画",
             sourceRef: { sourcePath: "Text/test.xhtml", nodeIndex: index },
           } satisfies ImageBlock
-        : {
+        : kind === "divider" ? {
             id,
             type: "divider",
+            sourceRef: { sourcePath: "Text/test.xhtml", nodeIndex: index },
+          } : {
+            id,
+            type: "spacer",
             sourceRef: { sourcePath: "Text/test.xhtml", nodeIndex: index },
           };
     return { block, documentId: "document-test", documentRole: "chapter", documentStart: index === 0 };
@@ -120,6 +124,16 @@ describe("BookReader", () => {
     expect(screen.getByRole("button", { name: /^片假名罗马音/ })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("maps paragraph spacing directly to em while keeping line height unitless", () => {
+    const settings = structuredClone(DEFAULT_READER_SETTINGS);
+    settings.appearance.typography.lineHeight = 1.6;
+    settings.appearance.typography.paragraphSpacing = 2;
+    render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={settings} onSaveSettings={async () => {}} />);
+    const reader = document.querySelector<HTMLElement>(".reader-app");
+    expect(reader?.style.getPropertyValue("--reader-line-height")).toBe("1.6");
+    expect(reader?.style.getPropertyValue("--reader-paragraph-spacing")).toBe("2em");
+  });
+
   it("captures independent text blocks at the top and bottom reading edges", () => {
     render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
     const blocks = [...document.querySelectorAll<HTMLElement>("[data-reading-anchor]")];
@@ -152,6 +166,26 @@ describe("BookReader", () => {
     expect(findNavigationTarget(rows, 4, 1, 2)).toBe(6);
     expect(findNavigationTarget(rows, 4, -1, 2)).toBe(3);
     expect(findNavigationTarget(rows, 2, -1, 2)).toBe(0);
+  });
+
+  it("skips spacers and dividers without counting them as navigation steps", () => {
+    const rows = navigationRows(["text", "spacer", "divider", "text", "spacer", "text"]);
+    expect(findNavigationTarget(rows, 0, 1, 2)).toBe(5);
+    expect(findNavigationTarget(rows, 5, -1, 2)).toBe(0);
+  });
+
+  it("renders spacers as visual height without making them reading anchors", () => {
+    const book = createDemoBook();
+    const bookDocument = book.documents[0];
+    if (!bookDocument) throw new Error("Demo book is missing its document fixture.");
+    bookDocument.blocks.splice(1, 0, {
+      id: "demo-spacer",
+      type: "spacer",
+      sourceRef: { sourcePath: "Text/demo.xhtml", nodeIndex: 98 },
+    });
+    render(<BookReader loaded={book} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
+    expect(document.querySelector("#demo-spacer")).toHaveClass("spacer-block");
+    expect(document.querySelector("#demo-spacer")).not.toHaveAttribute("data-reading-anchor");
   });
 
   it("makes every block image a reading anchor", () => {
@@ -190,11 +224,13 @@ describe("BookReader", () => {
   it("opens the menu with Digit1 and the TOC with Digit2, then jumps to an unmounted nested target", async () => {
     const user = userEvent.setup();
     const scrollTo = vi.spyOn(window, "scrollTo");
+    const startViewTransition = vi.fn();
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
     const loaded = createLongBook(200, true);
-    const document = loaded.documents[0] as NonNullable<typeof loaded.documents[0]>;
+    const bookDocument = loaded.documents[0] as NonNullable<typeof loaded.documents[0]>;
     loaded.book.toc = [{
       label: "分组",
-      children: [{ label: "结尾", target: { documentId: document.id, fragmentId: "last" }, children: [] }],
+      children: [{ label: "结尾", target: { documentId: bookDocument.id, fragmentId: "last" }, children: [] }],
     }];
     render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
     await user.keyboard("1");
@@ -207,6 +243,25 @@ describe("BookReader", () => {
     expect(screen.queryByRole("complementary", { name: "目录" })).not.toBeInTheDocument();
     const targetTop = Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)));
     expect(targetTop).toBeGreaterThan(5_000);
+    expect(startViewTransition).not.toHaveBeenCalled();
+  });
+
+  it("cross-fades an instant TOC jump when page transitions are enabled", async () => {
+    const user = userEvent.setup();
+    const scrollTo = vi.spyOn(window, "scrollTo");
+    const startViewTransition = vi.fn((update: () => void) => {
+      update();
+      return { finished: Promise.resolve() };
+    });
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
+    const loaded = createLongBook(200);
+    const bookDocument = loaded.documents[0] as NonNullable<typeof loaded.documents[0]>;
+    loaded.book.toc = [{ label: "结尾", target: { documentId: bookDocument.id, fragmentId: "last" }, children: [] }];
+    render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} settings={{ ...DEFAULT_READER_SETTINGS, pageTransitions: true }} onSaveSettings={async () => {}} />);
+    await user.keyboard("2");
+    await user.click(screen.getByRole("button", { name: "结尾" }));
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)))).toBeGreaterThan(5_000);
   });
 
   it("disables the TOC command for a book without TOC entries", async () => {
@@ -315,6 +370,7 @@ describe("BookReader", () => {
     }
 
     await user.keyboard("s");
+    expect(scrollTo.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ behavior: "smooth" }));
     const nextTop = Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)));
     expect(nextTop).toBeGreaterThan(100);
     scrollTo.mockClear();
@@ -465,7 +521,7 @@ describe("BookReader", () => {
     expect(screen.getByText("按键…")).toBeInTheDocument();
     await user.keyboard("{Control>}x{/Control}");
     expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      version: 5,
+      version: 6,
       shortcuts: expect.objectContaining({ topBackward: { code: "KeyX", modifier: "Control" } }),
     }));
     const binding = screen.getByRole("button", { name: "修改从顶部回退快捷键" });
@@ -537,7 +593,7 @@ describe("BookReader", () => {
       position: {
         documentId: loaded.documents[0]?.id as string,
         blockId: "long-paragraph-120",
-        viewportOffset: 24,
+        viewportOffset: -300,
         progress: 120 / 199,
         chapterLabel: null,
       },
@@ -545,6 +601,7 @@ describe("BookReader", () => {
     };
     const scrollTo = vi.spyOn(window, "scrollTo");
     render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
+    expect(document.querySelector("#long-paragraph-120")).toBeInTheDocument();
     await waitFor(() => {
       const targetTop = Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)));
       expect(targetTop).toBeGreaterThan(5_000);
@@ -578,6 +635,7 @@ describe("BookReader", () => {
     expect(savePosition).toHaveBeenCalledWith(expect.objectContaining({
       documentId: loaded.documents[0]?.id,
       blockId: anchors[0]?.id,
+      viewportOffset: 24,
       progress: 0,
     }));
 

@@ -100,6 +100,32 @@ describe("EPUB normalizer", () => {
     });
   });
 
+  it("preserves explicit empty paragraphs as one interior spacer and redirects their anchors", async () => {
+    const bodyMarkup = `<p id="leading"><br/></p><p id="start">第一段<br/></p><p id="gap-a"><span id="gap-child"><br/></span></p><p id="gap-b">　</p><p id="end">第二段</p><p id="trailing"></p>`;
+    const result = await convertEpubBytes(await makeEpubFixture({ bodyMarkup }), "spacing.epub");
+    const document = result.documents[0];
+    expect(document?.blocks.map((block) => block.type)).toEqual(["text", "spacer", "text"]);
+    expect(result.report.metrics.spacerBlockCount).toBe(1);
+    const firstId = document?.blocks[0]?.id;
+    const spacerId = document?.blocks[1]?.id;
+    const lastId = document?.blocks[2]?.id;
+    expect(document?.anchors).toMatchObject({
+      leading: firstId,
+      start: firstId,
+      "gap-a": spacerId,
+      "gap-child": spacerId,
+      "gap-b": spacerId,
+      end: lastId,
+      trailing: lastId,
+    });
+  });
+
+  it("does not classify image or unknown-content paragraphs as spacers", async () => {
+    const result = await convertEpubBytes(await makeEpubFixture({ bodyMarkup: `<p id="start"><img src="../Images/pic.png" alt="插画"/></p><p><math/></p>` }), "not-spacers.epub");
+    expect(result.report.metrics.spacerBlockCount).toBe(0);
+    expect(result.documents[0]?.blocks.some((block) => block.type === "image")).toBe(true);
+  });
+
   it("rejects dangerous archive paths and malformed XML", async () => {
     const zip = new JSZip();
     zip.file("mimetype", "application/epub+zip");
