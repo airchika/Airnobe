@@ -7,6 +7,7 @@ interface SpatialNavigationOptions {
   enabled: boolean;
   editing?: boolean;
   onActivate?(element: HTMLElement): boolean | void;
+  onCancel?(): boolean | void;
   keys?: "wasd" | "arrows" | "both";
 }
 
@@ -82,7 +83,7 @@ function focusSpatialItem(element: HTMLElement): void {
   element.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-export function useSpatialNavigation({ rootRef, enabled, editing = false, onActivate, keys = "wasd" }: SpatialNavigationOptions): void {
+export function useSpatialNavigation({ rootRef, enabled, editing = false, onActivate, onCancel, keys = "wasd" }: SpatialNavigationOptions): void {
   useEffect(() => {
     if (!enabled) return;
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -100,7 +101,14 @@ export function useSpatialNavigation({ rootRef, enabled, editing = false, onActi
         ArrowRight: "right",
       }[event.code] as SpatialDirection | undefined;
       const direction = directionAllowed(event.code, keys) ? directions : undefined;
-      if (!direction && event.code !== "Space") return;
+      if (event.code === "Escape" && !editing) {
+        if (onCancel?.() !== false) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
+      if (!direction && event.code !== "Space" && event.code !== "Enter") return;
       const root = rootRef.current;
       if (!root) return;
       const items = spatialItems(root);
@@ -123,7 +131,7 @@ export function useSpatialNavigation({ rootRef, enabled, editing = false, onActi
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [editing, enabled, keys, onActivate, rootRef]);
+  }, [editing, enabled, keys, onActivate, onCancel, rootRef]);
 }
 
 function directionAllowed(code: string, keys: "wasd" | "arrows" | "both"): boolean {

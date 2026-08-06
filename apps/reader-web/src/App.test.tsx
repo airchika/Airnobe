@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
-import { createDemoBook } from "./demo-book.js";
 import type { LibraryBook } from "./library-client.js";
 import { DEFAULT_READER_SETTINGS } from "./reader-settings.js";
 
@@ -77,9 +76,36 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "导出 EPUB" })).toHaveAttribute("download", "sample.epub");
   });
 
-  it("asks before opening an exact duplicate and avoids a second conversion", async () => {
+  it("imports multiple selected or dropped EPUB files through one sequential queue", async () => {
     const user = userEvent.setup();
-    const demo = createDemoBook();
+    const importedNames: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/library") return json({ version: 1, books: [] });
+      if (url === "/api/import-epub") {
+        importedNames.push(decodeURIComponent(String((init?.headers as Record<string, string>)["x-airnobe-filename"])));
+        return json({ outcome: "imported", bookId });
+      }
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    await screen.findByText("书库为空");
+    const first = new File(["one"], "one.epub", { type: "application/epub+zip" });
+    const second = new File(["two"], "two.epub", { type: "application/epub+zip" });
+    await user.upload(screen.getByLabelText("选择 EPUB 文件"), [first, second]);
+    expect(await screen.findByText(/导入 2 本/)).toBeInTheDocument();
+    expect(importedNames).toEqual(["one.epub", "two.epub"]);
+
+    const third = new File(["three"], "three.epub", { type: "application/epub+zip" });
+    fireEvent.dragEnter(window, { dataTransfer: { types: ["Files"], files: [third] } });
+    expect(screen.getByText("松开以导入 EPUB")).toBeInTheDocument();
+    fireEvent.drop(window, { dataTransfer: { types: ["Files"], files: [third] } });
+    await waitFor(() => expect(importedNames).toEqual(["one.epub", "two.epub", "three.epub"]));
+  });
+
+  it("ignores an exact duplicate without running a second conversion", async () => {
+    const user = userEvent.setup();
     let imports = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
@@ -92,7 +118,6 @@ describe("App", () => {
           book: { id: bookId, title: "已存在的书", authors: ["作者"] },
         });
       }
-      if (url === `/api/books/${bookId}`) return json({ book: demo.book, documents: demo.documents, report: demo.report });
       return json({ error: "unexpected request" }, 404);
     });
     render(<App />);
@@ -101,14 +126,12 @@ describe("App", () => {
       screen.getByLabelText("选择 EPUB 文件"),
       new File(["epub"], "sample.epub", { type: "application/epub+zip" }),
     );
-    expect(await screen.findByRole("dialog", { name: "重复书籍" })).toHaveTextContent("这本书已在书库中");
-    expect(screen.getByText("已存在的书")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "打开已有书" }));
-    await waitFor(() => expect(screen.getByRole("heading", { name: "第一章　雨后" })).toBeInTheDocument());
+    expect(await screen.findByText(/忽略 1 本/)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "重复书籍" })).not.toBeInTheDocument();
     expect(imports).toBe(1);
   });
 
-  it("offers replace, add, and cancel for a probable duplicate", async () => {
+  it("offers replace, add, ignore, apply-all, and cancel for a probable duplicate", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
@@ -126,16 +149,31 @@ describe("App", () => {
       screen.getByLabelText("选择 EPUB 文件"),
       new File(["epub"], "sample.epub", { type: "application/epub+zip" }),
     );
-    expect(await screen.findByRole("button", { name: "替换" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "另存为新书" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "替换" })).toHaveFocus());
-    await user.keyboard("d");
-    expect(screen.getByRole("button", { name: "另存为新书" })).toHaveFocus();
-    await user.keyboard("d");
-    expect(screen.getByRole("button", { name: "取消" })).toHaveFocus();
-    await user.keyboard(" ");
+    expect(await screen.findByRole("button", { name: "覆盖" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "作为新书加入" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "忽略" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /对后续同类冲突/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消剩余导入" }));
     expect(screen.queryByRole("dialog", { name: "重复书籍" })).not.toBeInTheDocument();
+  });
+
+  it("applies an ignore decision to later probable duplicates", async () => {
+    const user = userEvent.setup();
+    let imports = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/library") return json({ version: 1, books: [] });
+      if (url === "/api/import-epub") { imports += 1; return json({ outcome: "possible-duplicate", candidates: [{ id: bookId, title: "旧版本", authors: ["作者"] }] }); }
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    await screen.findByText("书库为空");
+    await user.upload(screen.getByLabelText("选择 EPUB 文件"), [new File(["1"], "one.epub"), new File(["2"], "two.epub")]);
+    await user.click(await screen.findByRole("button", { name: /对后续同类冲突/ }));
+    await user.click(screen.getByRole("button", { name: "忽略" }));
+    expect(await screen.findByText(/忽略 2 本/)).toBeInTheDocument();
+    expect(imports).toBe(2);
   });
 
   it("confirms permanent deletion from the row action menu", async () => {
@@ -158,12 +196,15 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "删除" }));
     const dialog = await screen.findByRole("dialog", { name: "删除书籍" });
     expect(dialog).toHaveTextContent("保存的原始 EPUB 都会被永久删除");
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "删除书籍" })).not.toBeInTheDocument();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "示例书籍" }));
     await user.click(screen.getByRole("button", { name: "删除" }));
-    await user.click(screen.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "确认删除" })).toHaveFocus());
+    await user.keyboard("d");
+    expect(screen.getByRole("button", { name: "取消" })).toHaveFocus();
+    await user.keyboard("a{Enter}");
     expect(await screen.findByText("书库为空")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(`/api/library/books/${bookId}`, { method: "DELETE" });
   });

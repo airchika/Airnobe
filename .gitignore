@@ -4,3 +4,5 @@ dist/
 coverage/
 .airnobe-*/
 AirnobeLibrary/
+no_update/
+image/

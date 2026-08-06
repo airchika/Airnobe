@@ -221,11 +221,15 @@ export function captureReadingAnchor(edge: ReadingEdge = "top"): ReadingAnchor |
 function restoreReadingAnchor(anchor: ReadingAnchor | undefined): void {
   if (!anchor) return;
   requestAnimationFrame(() => {
-    const element = document.getElementById(anchor.id);
-    if (!element) return;
-    const delta = element.getBoundingClientRect().top - anchor.top;
-    if (Math.abs(delta) > 0.5) window.scrollBy({ top: delta, behavior: "instant" });
+    adjustReadingAnchor(anchor);
   });
+}
+
+function adjustReadingAnchor(anchor: ReadingAnchor): void {
+  const element = document.getElementById(anchor.id);
+  if (!element) return;
+  const delta = element.getBoundingClientRect().top - anchor.top;
+  if (Math.abs(delta) > 0.5) window.scrollBy({ top: delta, behavior: "instant" });
 }
 
 function primaryVariant(block: TextBlock): ContentVariant | undefined {
@@ -314,6 +318,8 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
   const pageTurnInProgressRef = useRef(false);
   const pageTurnTimerRef = useRef<number | undefined>(undefined);
   const pageTurnReleaseTimerRef = useRef<number | undefined>(undefined);
+  const japaneseAnimationFrameRef = useRef<number | undefined>(undefined);
+  const mountedRef = useRef(true);
   const shortcutSaveRevisionRef = useRef(0);
   const progressSaveTimerRef = useRef<number | undefined>(undefined);
   const progressFrameRef = useRef<number | undefined>(undefined);
@@ -512,8 +518,25 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
 
   const toggleJapanese = useCallback(() => {
     const next = !showJapanese;
-    toggleWithAnchor(() => setShowJapanese(next)); saveDisplay("showJapanese", next);
-  }, [saveDisplay, showJapanese, toggleWithAnchor]);
+    const anchor = captureReadingAnchor("top");
+    flushSync(() => setShowJapanese(next));
+    if (japaneseAnimationFrameRef.current !== undefined) cancelAnimationFrame(japaneseAnimationFrameRef.current);
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      measureMountedRows(virtualizer);
+      restoreReadingAnchor(anchor);
+    } else {
+      const startedAt = performance.now();
+      const stabilize = (): void => {
+        if (!mountedRef.current) return;
+        measureMountedRows(virtualizer);
+        if (anchor) adjustReadingAnchor(anchor);
+        if (performance.now() - startedAt < 240) japaneseAnimationFrameRef.current = requestAnimationFrame(stabilize);
+        else japaneseAnimationFrameRef.current = undefined;
+      };
+      japaneseAnimationFrameRef.current = requestAnimationFrame(stabilize);
+    }
+    saveDisplay("showJapanese", next);
+  }, [saveDisplay, showJapanese, virtualizer]);
 
   const toggleAssistedRuby = useCallback(() => {
     const next = !showAssistedRuby;
@@ -577,9 +600,14 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     performViewChange(() => window.scrollBy({ top: direction * window.innerHeight, behavior: "instant" }));
   }, [performViewChange]);
 
-  useEffect(() => () => {
-    if (pageTurnTimerRef.current !== undefined) window.clearTimeout(pageTurnTimerRef.current);
-    if (pageTurnReleaseTimerRef.current !== undefined) window.clearTimeout(pageTurnReleaseTimerRef.current);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (japaneseAnimationFrameRef.current !== undefined) cancelAnimationFrame(japaneseAnimationFrameRef.current);
+      if (pageTurnTimerRef.current !== undefined) window.clearTimeout(pageTurnTimerRef.current);
+      if (pageTurnReleaseTimerRef.current !== undefined) window.clearTimeout(pageTurnReleaseTimerRef.current);
+    };
   }, []);
 
   const beginShortcutCapture = useCallback((action: ShortcutAction) => {
@@ -891,15 +919,17 @@ const Block = memo(function Block({ block, loaded, showJapanese, showAssistedRub
           />
         </span>
       )}
-      {showJapanese && japanese && !japaneseIsPrimary && (
-        <span className="content-variant content-variant--ja" lang="ja-JP" data-japanese-variant>
-          <InlineContent
-            nodes={japanese.content}
-            showAssistedRuby={showAssistedRuby}
-            showKatakanaRomaji={showKatakanaRomaji}
-            assetUrlById={loaded.assetUrlById}
-            onInternalLink={onInternalLink}
-          />
+      {japanese && !japaneseIsPrimary && (
+        <span className="japanese-collapse" data-visible={showJapanese} aria-hidden={!showJapanese}>
+          <span className="content-variant content-variant--ja" lang="ja-JP" data-japanese-variant>
+            <InlineContent
+              nodes={japanese.content}
+              showAssistedRuby={showAssistedRuby}
+              showKatakanaRomaji={showKatakanaRomaji}
+              assetUrlById={loaded.assetUrlById}
+              onInternalLink={onInternalLink}
+            />
+          </span>
         </span>
       )}
     </Tag>

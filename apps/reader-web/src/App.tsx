@@ -6,8 +6,6 @@ import {
   loadBookFromApi,
   loadBookFromFiles,
   saveReadingPosition,
-  type DuplicateResolution,
-  type EpubImportResult,
   type LibraryBookSummary,
   type LoadedBook,
 } from "./book-source.js";
@@ -32,6 +30,14 @@ import { SettingsPanel } from "./SettingsPanel.js";
 import { builtinThemeOptions, importTheme as importCustomTheme, loadThemes, type AvailableTheme } from "./theme-client.js";
 import { applyTheme, BUILTIN_THEMES, DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, type ThemeDefinition } from "./themes.js";
 
+type BatchDuplicateAction = "ignore" | "replace" | "add";
+interface BatchDuplicateDecision { action: BatchDuplicateAction | "cancel"; bookId?: string; applyToRemaining?: boolean }
+interface ImportBatchSummary {
+  total: number; imported: number; replaced: number; added: number; ignored: number; invalid: number; cancelled: number;
+  failures: Array<{ fileName: string; message: string }>;
+  warnings: Array<{ fileName: string; message: string }>;
+}
+
 export function App() {
   const initialDemo = new URLSearchParams(window.location.search).get("demo") === "1";
   const [loaded, setLoaded] = useState<LoadedBook | undefined>(() => initialDemo ? createDemoBook() : undefined);
@@ -43,10 +49,11 @@ export function App() {
   const [notice, setNotice] = useState<string>();
   const [duplicatePrompt, setDuplicatePrompt] = useState<{
     file: File;
-    kind: "exact" | "possible";
     candidates: LibraryBookSummary[];
   }>();
   const [selectedDuplicateId, setSelectedDuplicateId] = useState<string>();
+  const [applyDuplicateToRemaining, setApplyDuplicateToRemaining] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [deletePrompt, setDeletePrompt] = useState<{ bookId: string; title: string }>();
   const [settings, setSettings] = useState<ReaderSettings>(() => cloneReaderSettings(DEFAULT_READER_SETTINGS));
   const [themes, setThemes] = useState<AvailableTheme[]>(builtinThemeOptions);
@@ -61,6 +68,8 @@ export function App() {
   const duplicateSelectEntryRef = useRef<HTMLDivElement>(null);
   const overlayReturnFocusRef = useRef<HTMLElement | null>(null);
   const previousOverlayRef = useRef<string | undefined>(undefined);
+  const duplicateResolverRef = useRef<((decision: BatchDuplicateDecision) => void) | undefined>(undefined);
+  const importRunningRef = useRef(false);
 
   useEffect(() => {
     loadedRef.current = loaded;
@@ -186,37 +195,102 @@ export function App() {
     }
   };
 
-  const handleImportResult = async (file: File, result: EpubImportResult): Promise<void> => {
-    if (result.outcome === "imported") {
-      returnToLibrary();
-      await refreshLibrary(result.bookId);
-      if (result.warning) setNotice(result.warning);
-      return;
-    }
-    const candidates = result.outcome === "exact-duplicate" ? [result.book] : result.candidates;
-    setDuplicatePrompt({ file, kind: result.outcome === "exact-duplicate" ? "exact" : "possible", candidates });
+  const requestDuplicateDecision = (file: File, candidates: LibraryBookSummary[]): Promise<BatchDuplicateDecision> => new Promise((resolve) => {
+    duplicateResolverRef.current = resolve;
     setSelectedDuplicateId(candidates[0]?.id);
+    setApplyDuplicateToRemaining(false);
+    setDuplicatePrompt({ file, candidates });
+  });
+
+  const resolveDuplicateDecision = (decision: BatchDuplicateDecision): void => {
+    const resolve = duplicateResolverRef.current;
+    duplicateResolverRef.current = undefined;
+    setDuplicatePrompt(undefined);
+    setDuplicateSelectEditing(false);
+    resolve?.(decision);
   };
 
-  const submitEpub = async (file: File, resolution?: DuplicateResolution): Promise<void> => {
-    setLoading(resolution?.action === "replace" ? "正在替换…" : "正在转换 EPUB…");
-    setError(undefined);
-    setNotice(undefined);
+  const batchNotice = (summary: ImportBatchSummary): string => {
+    const parts = [`导入 ${summary.imported} 本`, `覆盖 ${summary.replaced} 本`, `另存 ${summary.added} 本`, `忽略 ${summary.ignored} 本`];
+    if (summary.invalid > 0) parts.push(`非 EPUB ${summary.invalid} 个`);
+    if (summary.failures.length > 0) parts.push(`失败 ${summary.failures.length} 本`);
+    if (summary.cancelled > 0) parts.push(`取消 ${summary.cancelled} 本`);
+    const details = [...summary.failures, ...summary.warnings].map((item) => `${item.fileName}：${item.message}`).join("；");
+    return `批量处理完成：${parts.join("，")}。${details ? ` ${details}` : ""}`;
+  };
+
+  const startImportBatch = useCallback(async (input: File[], invalid = 0): Promise<void> => {
+    if (importRunningRef.current) { setError("已有 EPUB 导入任务正在进行。"); return; }
+    const files = input.filter((file) => file.name.toLowerCase().endsWith(".epub"));
+    const invalidCount = invalid + input.length - files.length;
+    if (files.length === 0) { setNotice(invalidCount > 0 ? `没有可导入的 EPUB，已忽略 ${invalidCount} 个其他项目。` : "没有选择 EPUB 文件。"); return; }
+    importRunningRef.current = true;
+    setError(undefined); setNotice(undefined); returnToLibrary();
+    const summary: ImportBatchSummary = { total: files.length, imported: 0, replaced: 0, added: 0, ignored: 0, invalid: invalidCount, cancelled: 0, failures: [], warnings: [] };
+    let policy: BatchDuplicateAction | undefined;
+    let lastBookId: string | undefined;
     try {
-      await handleImportResult(file, await importEpubFile(file, resolution));
-    } catch (loadError) {
-      setError((loadError as Error).message);
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index] as File;
+        setLoading(`正在导入 ${index + 1}/${files.length}：${file.name}`);
+        try {
+          let result = await importEpubFile(file, policy === "add" ? { action: "add" } : undefined);
+          if (result.outcome === "exact-duplicate") { summary.ignored += 1; continue; }
+          if (result.outcome === "possible-duplicate") {
+            let decision: BatchDuplicateDecision;
+            if (policy === "ignore") decision = { action: "ignore" };
+            else if (policy === "add") decision = { action: "add" };
+            else if (policy === "replace" && result.candidates[0]) decision = { action: "replace", bookId: result.candidates[0].id };
+            else { setLoading(undefined); decision = await requestDuplicateDecision(file, result.candidates); }
+            if (decision.action === "cancel") { summary.cancelled = files.length - index; break; }
+            if (decision.applyToRemaining) policy = decision.action;
+            if (decision.action === "ignore") { summary.ignored += 1; continue; }
+            if (decision.action === "replace" && !decision.bookId) throw new Error("没有选择要覆盖的书籍。");
+            setLoading(`正在${decision.action === "replace" ? "覆盖" : "另存"} ${index + 1}/${files.length}：${file.name}`);
+            result = await importEpubFile(file, decision.action === "replace" ? { action: "replace", bookId: decision.bookId as string } : { action: "add" });
+            if (result.outcome !== "imported") throw new Error("重复书籍处理后仍未完成导入。");
+            lastBookId = result.bookId;
+            if (decision.action === "replace") summary.replaced += 1; else summary.added += 1;
+            if (result.warning) summary.warnings.push({ fileName: file.name, message: result.warning });
+            continue;
+          }
+          lastBookId = result.bookId;
+          summary.imported += 1;
+          if (result.warning) summary.warnings.push({ fileName: file.name, message: result.warning });
+        } catch (loadError) {
+          summary.failures.push({ fileName: file.name, message: (loadError as Error).message });
+        }
+      }
+      await refreshLibrary(lastBookId);
+      setNotice(batchNotice(summary));
     } finally {
       setLoading(undefined);
+      importRunningRef.current = false;
+      duplicateResolverRef.current = undefined;
+      setDuplicatePrompt(undefined);
     }
+  }, [refreshLibrary]);
+
+  const onEpubSelected = (event: ChangeEvent<HTMLInputElement>): void => {
+    const files = event.currentTarget.files ? [...event.currentTarget.files] : [];
+    event.currentTarget.value = "";
+    if (files.length > 0) void startImportBatch(files);
   };
 
-  const onEpubSelected = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) return;
-    await submitEpub(file);
-  };
+  useEffect(() => {
+    const containsFiles = (event: DragEvent): boolean => [...(event.dataTransfer?.types ?? [])].includes("Files");
+    const onDragEnter = (event: DragEvent): void => { if (!containsFiles(event)) return; event.preventDefault(); setDragActive(true); };
+    const onDragOver = (event: DragEvent): void => { if (!containsFiles(event)) return; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = "copy"; setDragActive(true); };
+    const onDragLeave = (event: DragEvent): void => { if (event.relatedTarget === null) setDragActive(false); };
+    const onDrop = (event: DragEvent): void => {
+      if (!containsFiles(event)) return;
+      event.preventDefault(); setDragActive(false);
+      const files = [...(event.dataTransfer?.files ?? [])];
+      if (files.length > 0) void startImportBatch(files);
+    };
+    window.addEventListener("dragenter", onDragEnter); window.addEventListener("dragover", onDragOver); window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop);
+    return () => { window.removeEventListener("dragenter", onDragEnter); window.removeEventListener("dragover", onDragOver); window.removeEventListener("dragleave", onDragLeave); window.removeEventListener("drop", onDrop); };
+  }, [startImportBatch]);
 
   const onDirectorySelected = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const files = event.currentTarget.files ? [...event.currentTarget.files] : [];
@@ -281,6 +355,14 @@ export function App() {
     enabled: Boolean(interactiveOverlay && interactiveOverlay !== "settings"),
     editing: duplicateSelectEditing,
     onActivate: activateOverlayItem,
+    keys: "both",
+    onCancel: () => {
+      if (duplicatePrompt) { resolveDuplicateDecision({ action: "cancel" }); return true; }
+      if (deletePrompt) { setDeletePrompt(undefined); return true; }
+      if (error) { setError(undefined); return true; }
+      if (notice) { setNotice(undefined); return true; }
+      return false;
+    },
   });
 
   useEffect(() => {
@@ -305,6 +387,7 @@ export function App() {
       <input
         className="file-input"
         type="file"
+        multiple
         accept=".epub,application/epub+zip"
         ref={epubInputRef}
         onChange={onEpubSelected}
@@ -359,12 +442,14 @@ export function App() {
         onClose={() => setSettingsOpen(false)}
       />}
       {overlayMessage && <div className="loading-overlay" role="status"><span className="loading-dot" />{overlayMessage}</div>}
+      {dragActive && !overlayMessage && <div className="file-drop-overlay" role="status"><span>松开以导入 EPUB</span></div>}
       <div className="app-spatial-overlays" ref={overlayRootRef}>
       {duplicatePrompt && (
         <div className="reader-menu-backdrop">
           <div className="duplicate-dialog" role="dialog" aria-modal="true" aria-label="重复书籍">
-            <strong>{duplicatePrompt.kind === "exact" ? "这本书已在书库中" : "可能是同一本书的新版本"}</strong>
-            {duplicatePrompt.kind === "possible" && duplicatePrompt.candidates.length > 1
+            <strong>可能是同一本书的新版本</strong>
+            <span>{duplicatePrompt.file.name}</span>
+            {duplicatePrompt.candidates.length > 1
               ? (
                 <div className="duplicate-select-entry" ref={duplicateSelectEntryRef} tabIndex={0} data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="0" data-spatial-action="edit-duplicate-select">
                 <select
@@ -388,30 +473,12 @@ export function App() {
                 </div>
               )
               : <span>{duplicatePrompt.candidates[0]?.title || "未命名书籍"}</span>}
+            <button type="button" className="duplicate-apply-all" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="1" aria-pressed={applyDuplicateToRemaining} onClick={() => setApplyDuplicateToRemaining((current) => !current)}>对后续同类冲突执行此操作：{applyDuplicateToRemaining ? "是" : "否"}</button>
             <div className="duplicate-dialog-actions">
-              {duplicatePrompt.kind === "exact"
-                ? <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="1" className="primary-action" onClick={() => {
-                    const id = duplicatePrompt.candidates[0]?.id;
-                    setDuplicatePrompt(undefined);
-                    if (!id) return;
-                    void readLibraryBook(id);
-                  }}>打开已有书</button>
-                : (
-                  <>
-                    <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="1" className="primary-action" onClick={() => {
-                      const prompt = duplicatePrompt;
-                      const bookId = selectedDuplicateId;
-                      setDuplicatePrompt(undefined);
-                      if (bookId) void submitEpub(prompt.file, { action: "replace", bookId });
-                    }}>替换</button>
-                    <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="1" className="secondary-action" onClick={() => {
-                      const file = duplicatePrompt.file;
-                      setDuplicatePrompt(undefined);
-                      void submitEpub(file, { action: "add" });
-                    }}>另存为新书</button>
-                  </>
-                )}
-              <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="1" className="secondary-action" onClick={() => setDuplicatePrompt(undefined)}>取消</button>
+              <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="2" className="primary-action" onClick={() => resolveDuplicateDecision({ action: "replace", ...(selectedDuplicateId ? { bookId: selectedDuplicateId } : {}), applyToRemaining: applyDuplicateToRemaining })}>覆盖</button>
+              <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="2" className="secondary-action" onClick={() => resolveDuplicateDecision({ action: "add", applyToRemaining: applyDuplicateToRemaining })}>作为新书加入</button>
+              <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="2" className="secondary-action" onClick={() => resolveDuplicateDecision({ action: "ignore", applyToRemaining: applyDuplicateToRemaining })}>忽略</button>
+              <button type="button" data-spatial-item data-spatial-zone="dialog" data-spatial-zone-order="0" data-spatial-row="2" className="secondary-action" onClick={() => resolveDuplicateDecision({ action: "cancel" })}>取消剩余导入</button>
             </div>
           </div>
         </div>

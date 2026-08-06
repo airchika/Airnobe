@@ -17,4 +17,17 @@ describe("themes", () => {
     expect(parseThemeDefinition({ ...valid, colors: { ...valid.colors, customCss: "body{}" } })).toBeUndefined();
     expect(parseThemeDefinition({ ...valid, css: "body{}" })).toBeUndefined();
   });
+
+  it("normalizes legacy v1 themes while dropping obsolete ruby colors", () => {
+    const current = structuredClone(BUILTIN_THEMES[0]!);
+    const legacy = {
+      ...current,
+      version: 1,
+      colors: { ...current.colors, rubyReused: "#112233", rubyGenerated: "#223344", rubyRomaji: "#334455" },
+    };
+    const parsed = parseThemeDefinition(legacy);
+    expect(parsed?.version).toBe(2);
+    expect(parsed?.colors).not.toHaveProperty("rubyReused");
+    expect(parseThemeDefinition({ ...current, colors: { ...current.colors, rubyReused: "#112233" } })).toBeUndefined();
+  });
 });

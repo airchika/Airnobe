@@ -7,6 +7,7 @@ Object.defineProperty(window, "scrollTo", { value: () => {}, writable: true });
 Object.defineProperty(document.documentElement, "scrollHeight", { value: 100_000, configurable: true });
 Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: () => {}, writable: true });
 Object.defineProperty(window, "requestAnimationFrame", { value: (callback: FrameRequestCallback) => window.setTimeout(callback, 0), writable: true });
+Object.defineProperty(window, "cancelAnimationFrame", { value: (handle: number) => window.clearTimeout(handle), writable: true });
 Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
   configurable: true,
   value: () => ({

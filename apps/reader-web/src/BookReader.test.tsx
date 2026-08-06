@@ -99,7 +99,9 @@ describe("BookReader", () => {
     const user = userEvent.setup();
     render(<BookReader loaded={createDemoBook()} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} />);
 
-    expect(document.querySelectorAll("[data-japanese-variant]")).toHaveLength(0);
+    const mountedRows = document.querySelectorAll("[data-virtual-row]").length;
+    expect(document.querySelectorAll("[data-japanese-variant]").length).toBeGreaterThan(0);
+    expect(document.querySelector(".japanese-collapse")).toHaveAttribute("data-visible", "false");
     await user.keyboard("1");
     expect(document.querySelectorAll("[data-japanese-variant]").length).toBeGreaterThan(0);
     expect(screen.getByText("まち")).toBeInTheDocument();
@@ -118,7 +120,8 @@ describe("BookReader", () => {
     expect(screen.getByText("まど")).toBeInTheDocument();
 
     await user.keyboard("1");
-    expect(document.querySelectorAll("[data-japanese-variant]")).toHaveLength(0);
+    expect(document.querySelector(".japanese-collapse")).toHaveAttribute("data-visible", "false");
+    expect(document.querySelectorAll("[data-virtual-row]")).toHaveLength(mountedRows);
     openReaderMenu();
     expect(screen.getByLabelText("阅读侧边栏")).toBeInTheDocument();
   });
@@ -243,6 +246,7 @@ describe("BookReader", () => {
     fireEvent.keyDown(window, { key: "m", code: "KeyM", ctrlKey: true });
     expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ shortcuts: expect.objectContaining({ toggleSidebar: { code: "KeyM", modifier: "Control" } }) }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "回退/快进段数" }), { target: { value: "4" } });
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "回退/快进段数" }), { key: "Enter", code: "Enter" });
     await waitFor(() => expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ navigation: { textSteps: 4 } })));
   });
 

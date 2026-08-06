@@ -40,12 +40,16 @@ describe("LibraryView", () => {
     expect(metadataLanguageClass(recent, "カタカナ")).toBe("font-japanese");
   });
 
-  it("opens status picker and updates the selected status", async () => {
+  it("opens status picker from the action menu and updates the selected status", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn(async () => {});
     renderView({ onUpdate });
-    await user.click(screen.getByRole("button", { name: "新书状态：在看" }));
-    const picker = screen.getByRole("listbox", { name: "选择收藏状态" });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "新书" }));
+    await user.click(screen.getByRole("button", { name: "修改状态" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("menu", { name: "书籍操作" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "修改状态" }));
+    const picker = screen.getByRole("menu", { name: "选择收藏状态" });
     await user.click(within(picker).getByRole("button", { name: "看过" }));
     expect(onUpdate).toHaveBeenCalledWith(recent.id, { collectionStatus: "completed" });
   });
@@ -70,6 +74,8 @@ describe("LibraryView", () => {
 
   it("formats recent reading time without using library updatedAt", () => {
     expect(formatRecentlyOpened(old, new Date("2026-08-06T12:00:00Z"))).toBe("未打开");
-    expect(formatRecentlyOpened(recent, new Date("2026-08-06T12:00:00Z"))).toBe("今天");
+    expect(formatRecentlyOpened(recent, new Date("2026-08-06T12:00:00Z"))).toBe("12小时前");
+    expect(formatRecentlyOpened({ ...recent, readingProgress: { ...recent.readingProgress!, updatedAt: "2026-08-06T11:58:00Z" } }, new Date("2026-08-06T12:00:00Z"))).toBe("2分钟前");
+    expect(formatRecentlyOpened({ ...recent, readingProgress: { ...recent.readingProgress!, updatedAt: "2026-06-06T12:00:00Z" } }, new Date("2026-08-06T12:00:00Z"))).toBe("2月前");
   });
 });

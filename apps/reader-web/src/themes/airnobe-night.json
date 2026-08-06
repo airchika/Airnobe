@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "id": "airnobe-night",
   "name": "Airnobe Night",
   "variant": "dark",
@@ -7,7 +7,6 @@
     "background": "#0e1113", "surface": "#15191c", "surfaceRaised": "#1c2125eb", "sidebar": "#111518",
     "text": "#dfe5e7", "mutedText": "#879197", "border": "#ffffff17", "accent": "#d7a85c",
     "accentText": "#17191a", "accentSoft": "#d7a85c24", "link": "#e4bd78", "readingText": "#dfe5e7",
-    "japaneseRule": "#d7a85c", "rubySource": "#bda579", "rubyReused": "#aa92cf", "rubyGenerated": "#86aeb0",
-    "rubyRomaji": "#d2a8c7", "danger": "#e8b0a7"
+    "japaneseRule": "#d7a85c", "rubySource": "#bda579", "danger": "#e8b0a7"
   }
 }

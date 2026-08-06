@@ -6,14 +6,15 @@ import xcodeDark from "./themes/xcode-dark.json";
 
 export const THEME_COLOR_KEYS = [
   "background", "surface", "surfaceRaised", "sidebar", "text", "mutedText", "border", "accent",
-  "accentText", "accentSoft", "link", "readingText", "japaneseRule", "rubySource", "rubyReused",
-  "rubyGenerated", "rubyRomaji", "danger",
+  "accentText", "accentSoft", "link", "readingText", "japaneseRule", "rubySource", "danger",
 ] as const;
+
+const LEGACY_RUBY_COLOR_KEYS = ["rubyReused", "rubyGenerated", "rubyRomaji"] as const;
 
 export type ThemeColorKey = typeof THEME_COLOR_KEYS[number];
 
 export interface ThemeDefinition {
-  version: 1;
+  version: 2;
   id: string;
   name: string;
   variant: "dark" | "light";
@@ -31,7 +32,7 @@ export function parseThemeDefinition(value: unknown): ThemeDefinition | undefine
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some((key) => !["version", "id", "name", "variant", "colors"].includes(key))) return undefined;
-  if (record.version !== 1 || !isThemeId(record.id)) return undefined;
+  if ((record.version !== 1 && record.version !== 2) || !isThemeId(record.id)) return undefined;
   if (typeof record.name !== "string" || record.name.trim().length === 0 || record.name.length > 60) return undefined;
   if (record.variant !== "dark" && record.variant !== "light") return undefined;
   if (typeof record.colors !== "object" || record.colors === null) return undefined;
@@ -41,9 +42,13 @@ export function parseThemeDefinition(value: unknown): ThemeDefinition | undefine
     return typeof color === "string" && COLOR_PATTERN.test(color) ? [key, color.toLowerCase()] as const : undefined;
   });
   if (entries.some((entry) => entry === undefined)) return undefined;
-  if (Object.keys(colorRecord).some((key) => !THEME_COLOR_KEYS.includes(key as ThemeColorKey))) return undefined;
+  const allowedColorKeys: readonly string[] = record.version === 1
+    ? [...THEME_COLOR_KEYS, ...LEGACY_RUBY_COLOR_KEYS]
+    : THEME_COLOR_KEYS;
+  if (record.version === 1 && LEGACY_RUBY_COLOR_KEYS.some((key) => typeof colorRecord[key] !== "string" || !COLOR_PATTERN.test(colorRecord[key] as string))) return undefined;
+  if (Object.keys(colorRecord).some((key) => !allowedColorKeys.includes(key))) return undefined;
   const colors = Object.fromEntries(entries as Array<readonly [ThemeColorKey, string]>) as Record<ThemeColorKey, string>;
-  return { version: 1, id: record.id, name: record.name.trim(), variant: record.variant, colors };
+  return { version: 2, id: record.id, name: record.name.trim(), variant: record.variant, colors };
 }
 
 function builtin(value: unknown): ThemeDefinition {
@@ -62,8 +67,7 @@ const CSS_VARIABLES: Record<ThemeColorKey, string> = {
   background: "--background", surface: "--surface", surfaceRaised: "--surface-raised", sidebar: "--sidebar",
   text: "--text", mutedText: "--muted", border: "--line", accent: "--accent", accentText: "--accent-text",
   accentSoft: "--accent-soft", link: "--link", readingText: "--reading-text", japaneseRule: "--japanese-rule",
-  rubySource: "--ruby-source", rubyReused: "--ruby-reused", rubyGenerated: "--ruby-generated",
-  rubyRomaji: "--ruby-romaji", danger: "--danger",
+  rubySource: "--ruby-source", danger: "--danger",
 };
 
 export function applyTheme(theme: ThemeDefinition): void {

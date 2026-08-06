@@ -30,4 +30,15 @@ describe("theme store", () => {
     if (!builtin) throw new Error("Missing theme fixture.");
     await expect(writeCustomTheme(directory, builtin)).rejects.toThrow(/内置主题/);
   });
+
+  it("reads legacy v1 files as normalized v2 themes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "airnobe-themes-"));
+    temporaryDirectories.push(directory);
+    const current = structuredClone(BUILTIN_THEMES[0]!);
+    const legacy = { ...current, version: 1, id: "legacy-night", colors: { ...current.colors, rubyReused: "#112233", rubyGenerated: "#223344", rubyRomaji: "#334455" } };
+    await writeFile(join(directory, "legacy-night.json"), JSON.stringify(legacy), "utf8");
+    const [theme] = await readCustomThemes(directory);
+    expect(theme?.version).toBe(2);
+    expect(theme?.colors).not.toHaveProperty("rubyGenerated");
+  });
 });
