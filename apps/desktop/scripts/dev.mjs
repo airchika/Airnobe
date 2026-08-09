@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
 const desktopDirectory = resolve(import.meta.dirname, "..");
@@ -7,6 +8,9 @@ const npmCli = process.env.npm_execpath;
 if (!npmCli) throw new Error("无法定位 npm CLI，请通过 npm run desktop 启动。");
 const tauriCli = resolve(repositoryDirectory, "node_modules/@tauri-apps/cli/tauri.js");
 const readerServer = resolve(repositoryDirectory, "apps/reader-web/dev-server.ts");
+const sidecarBinariesDirectory = resolve(desktopDirectory, "src-tauri/binaries");
+const sidecarBuildScript = resolve(desktopDirectory, "scripts/build-sidecar.mjs");
+const guideBuildScript = resolve(desktopDirectory, "scripts/build-guide-epub.mjs");
 const cargoBin = resolve(process.env.USERPROFILE ?? "", ".cargo/bin");
 const childEnvironment = {
   ...process.env,
@@ -69,6 +73,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 process.on("exit", stopReader);
 
 try {
+  run(process.execPath, [guideBuildScript], desktopDirectory);
   const reuseReader = await isAirnobeServerReady();
   if (reuseReader) {
     console.log("使用已运行的 Airnobe Reader 服务：http://127.0.0.1:5173/");
@@ -83,6 +88,13 @@ try {
     });
     await waitForReader();
   }
+
+  const sidecarExists = existsSync(sidecarBinariesDirectory)
+    && readdirSync(sidecarBinariesDirectory).some((name) => {
+      if (!name.startsWith("airnobe-sidecar-") || !name.endsWith(process.platform === "win32" ? ".exe" : "")) return false;
+      return statSync(resolve(sidecarBinariesDirectory, name)).size > 0;
+    });
+  if (!sidecarExists) run(process.execPath, [sidecarBuildScript], desktopDirectory);
 
   tauriProcess = spawn(process.execPath, [tauriCli, "dev"], {
     cwd: desktopDirectory,

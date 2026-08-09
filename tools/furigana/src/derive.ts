@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import kuromoji from "kuromoji";
+import kuromojiPackageJson from "kuromoji/package.json" with { type: "json" };
+import wanakanaPackageJson from "wanakana/package.json" with { type: "json" };
 import {
   BookDocumentSchema,
   BookManifestSchema,
@@ -15,9 +17,7 @@ import type { AssetPayload, ConversionResult } from "@airnobe/epub-normalizer";
 import { annotateDocuments, type TokenizerLike } from "./annotate.js";
 
 const require = createRequire(import.meta.url);
-const packageJson = require("kuromoji/package.json") as { version: string };
-const wanakanaPackageJson = require("wanakana/package.json") as { version: string };
-export const KUROMOJI_VERSION = packageJson.version;
+export const KUROMOJI_VERSION = kuromojiPackageJson.version;
 export const WANAKANA_VERSION = wanakanaPackageJson.version;
 export const DICTIONARY_ID = "mecab-ipadic-2.7.0-20070801-bundled";
 
@@ -26,7 +26,8 @@ function derivedBookId(baseBookId: string): string {
 }
 
 export async function loadTokenizer(): Promise<TokenizerLike> {
-  const dictionaryPath = join(dirname(require.resolve("kuromoji/package.json")), "dict").replace(/\\/g, "/");
+  const dictionaryPath = (process.env.AIRNOBE_KUROMOJI_DICTIONARY?.trim()
+    || join(dirname(require.resolve("kuromoji/package.json")), "dict")).replace(/\\/g, "/");
   return new Promise((resolve, reject) => {
     kuromoji.builder({ dicPath: dictionaryPath }).build((error, tokenizer) => {
       if (error) reject(error);

@@ -2,13 +2,21 @@
   "name": "@airnobe/desktop",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1 build --no-bundle",
+    "build:guide": "node scripts/build-guide-epub.mjs",
+    "build:sidecar:binary": "node scripts/build-sidecar.mjs",
+    "build:sidecar": "npm --prefix ../.. run build && npm run build:sidecar:binary",
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1 build --bundles nsis",
+    "build:app": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1 build --no-bundle",
     "typecheck": "tsc -p ../reader-web/tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4"
+    "@tauri-apps/cli": "^2.11.4",
+    "@yao-pkg/pkg": "^6.22.0",
+    "esbuild": "^0.28.2",
+    "jszip": "^3.10.1"
   }
 }

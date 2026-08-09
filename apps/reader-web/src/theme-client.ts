@@ -1,4 +1,5 @@
 import { BUILTIN_THEMES, parseThemeDefinition, type ThemeDefinition } from "./themes.js";
+import { apiFetch } from "./api-transport.js";
 
 export interface AvailableTheme {
   theme: ThemeDefinition;
@@ -32,11 +33,11 @@ async function responseJson(response: Response): Promise<unknown> {
 }
 
 export async function loadThemes(): Promise<AvailableTheme[]> {
-  return parseThemeList(await responseJson(await fetch("/api/themes")));
+  return parseThemeList(await responseJson(await apiFetch("/api/themes")));
 }
 
 export async function importTheme(theme: ThemeDefinition): Promise<AvailableTheme> {
-  const value = await responseJson(await fetch(`/api/themes/${encodeURIComponent(theme.id)}`, {
+  const value = await responseJson(await apiFetch(`/api/themes/${encodeURIComponent(theme.id)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(theme),

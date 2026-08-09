@@ -1,14 +1,29 @@
-font/
+# Local inputs and working data
+Font/
+epub/
+image/
+local/
+AirnobeLibrary/
+.env
+.env.*
+!.env.example
+
+# JavaScript and test output
 node_modules/
 dist/
 coverage/
+
+# Rust and desktop build output
 target/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/icons/android/
 apps/desktop/src-tauri/icons/ios/
 apps/desktop/src-tauri/icons/*.icns
 apps/desktop/src-tauri/icons/*.png
+apps/desktop/.sidecar-build/
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/resources/kuromoji-dict/
+apps/desktop/src-tauri/resources/airnobe-getting-started.epub
+
+# Local validation output
 .airnobe-*/
-AirnobeLibrary/
-no_update/
-image/

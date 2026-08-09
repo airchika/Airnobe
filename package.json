@@ -1,7 +1,10 @@
 {
   "name": "airnobe",
   "version": "0.1.0",
+  "description": "Windows 中日双语 EPUB 轻小说书库与阅读器",
   "private": true,
+  "license": "GPL-3.0-only",
+  "repository": "https://github.com/airchika/Airnobe.git",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
@@ -12,18 +15,21 @@
     "tools/*"
   ],
   "scripts": {
+    "setup:fonts": "node scripts/setup-fonts.mjs",
     "build": "npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && npm run build -w @airnobe/furigana && npm run build -w @airnobe/reader-web",
     "typecheck": "npm run typecheck -w @airnobe/book-format && npm run build -w @airnobe/book-format && npm run typecheck -w @airnobe/epub-normalizer && npm run build -w @airnobe/epub-normalizer && npm run typecheck -w @airnobe/furigana && npm run build -w @airnobe/furigana && npm run typecheck -w @airnobe/reader-web",
-    "test": "npm run build -w @airnobe/book-format && npm run test -w @airnobe/book-format && npm run test -w @airnobe/epub-normalizer && npm run build -w @airnobe/epub-normalizer && npm run test -w @airnobe/furigana && npm run build -w @airnobe/furigana && npm run test -w @airnobe/reader-web",
+    "test": "npm run build:guide -w @airnobe/desktop && npm run build -w @airnobe/book-format && npm run test -w @airnobe/book-format && npm run test -w @airnobe/epub-normalizer && npm run build -w @airnobe/epub-normalizer && npm run test -w @airnobe/furigana && npm run build -w @airnobe/furigana && npm run test -w @airnobe/reader-web",
     "test:real": "npm run build -w @airnobe/book-format && cross-env RUN_REAL_EPUB_TESTS=1 npm run test -w @airnobe/epub-normalizer -- real-epubs",
     "convert": "npm run build -w @airnobe/book-format && tsx tools/epub-normalizer/src/cli.ts",
     "furigana": "npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && tsx tools/furigana/src/cli.ts",
-    "reader": "npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && npm run build -w @airnobe/furigana && npm run dev -w @airnobe/reader-web",
+    "reader": "npm run build:guide -w @airnobe/desktop && npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && npm run build -w @airnobe/furigana && npm run dev -w @airnobe/reader-web",
     "desktop": "npm run dev -w @airnobe/desktop",
+    "check:desktop": "node apps/desktop/scripts/check-cargo.mjs",
     "desktop:check": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/tauri.ps1 info"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "7zip-bin": "5.2.0",
     "cross-env": "^10.1.0",
     "tsx": "^4.23.1",
     "typescript": "^5.9.3",

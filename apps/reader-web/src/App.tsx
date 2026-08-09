@@ -32,10 +32,11 @@ import { SettingsPanel } from "./SettingsPanel.js";
 import { builtinThemeOptions, importTheme as importCustomTheme, loadThemes, type AvailableTheme } from "./theme-client.js";
 import { applyTheme, BUILTIN_THEMES, DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, type ThemeDefinition } from "./themes.js";
 import { chooseDesktopEpubFiles, listenForDesktopEpubDrop } from "./desktop-files.js";
-import { EMPTY_APP_STATE, loadAppState, saveAppState } from "./app-state.js";
+import { EMPTY_APP_STATE, loadAppState, saveAppState, saveLibraryFilter, type LibraryFilter } from "./app-state.js";
 import { toggleFullscreenState } from "./fullscreen.js";
 import { NoveliaImportDialog } from "./NoveliaImportDialog.js";
 import { downloadNoveliaEpubFile } from "./novelia-client.js";
+import { loadDesktopSettings, saveDesktopAutostart, saveDesktopShortcut, type DesktopSettings } from "./desktop-settings.js";
 
 type BatchDuplicateAction = "ignore" | "replace" | "add";
 interface BatchDuplicateDecision { action: BatchDuplicateAction | "cancel"; bookId?: string; applyToRemaining?: boolean }
@@ -59,6 +60,7 @@ export function App() {
   const [libraryBooks, setLibraryBooks] = useState<LibraryBook[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<string>();
   const [lastReadingBookId, setLastReadingBookId] = useState<string>();
+  const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
   const [libraryLoading, setLibraryLoading] = useState(!initialDemo);
   const [loading, setLoading] = useState<string>();
   const [error, setError] = useState<string>();
@@ -76,6 +78,7 @@ export function App() {
   const [themes, setThemes] = useState<AvailableTheme[]>(builtinThemeOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [noveliaImportOpen, setNoveliaImportOpen] = useState(false);
+  const [desktopSettings, setDesktopSettings] = useState<DesktopSettings>();
   const [systemDark, setSystemDark] = useState(() => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true);
   const [duplicateSelectEditing, setDuplicateSelectEditing] = useState(false);
   const epubInputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +112,12 @@ export function App() {
 
   useEffect(() => {
     let active = true;
+    void loadDesktopSettings().then((next) => { if (active) setDesktopSettings(next); }).catch((desktopError) => { if (active) setError((desktopError as Error).message); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     void loadThemes().then((next) => { if (active) setThemes(next); }).catch(() => {});
     return () => { active = false; };
   }, []);
@@ -130,7 +139,7 @@ export function App() {
     applyTheme(selected);
   }, [settings.appearance.theme, systemDark, themes]);
 
-  const refreshLibrary = useCallback(async (preferredBookId?: string, rememberedBookId?: string | null): Promise<LibraryBook[]> => {
+  const refreshLibrary = useCallback(async (preferredBookId?: string, rememberedBookId?: string | null, restoredFilter?: LibraryFilter): Promise<LibraryBook[]> => {
     const books = await loadLibrary();
     setLibraryBooks(books);
     setLastReadingBookId((current) => {
@@ -140,7 +149,9 @@ export function App() {
     setSelectedBookId((current) => {
       if (preferredBookId && books.some((book) => book.id === preferredBookId)) return preferredBookId;
       if (current && books.some((book) => book.id === current)) return current;
-      return [...books].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.id;
+      return restoredFilter && restoredFilter !== "all"
+        ? undefined
+        : [...books].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.id;
     });
     return books;
   }, []);
@@ -150,7 +161,10 @@ export function App() {
     let active = true;
     void loadAppState()
       .catch(() => structuredClone(EMPTY_APP_STATE))
-      .then((state) => refreshLibrary(undefined, state.lastReadingBookId))
+      .then((state) => {
+        setLibraryFilter(state.libraryFilter);
+        return refreshLibrary(undefined, state.lastReadingBookId, state.libraryFilter);
+      })
       .catch((libraryError) => {
         if (active) setError((libraryError as Error).message);
       })
@@ -484,6 +498,13 @@ export function App() {
           />
         : <LibraryView
             books={libraryBooks}
+            filter={libraryFilter}
+            onFilterChange={(nextFilter) => {
+              setLibraryFilter(nextFilter);
+              void saveLibraryFilter(nextFilter).catch((stateError) => {
+                setOpenIssue({ title: "状态未保存", message: `筛选已生效，但无法保存：${(stateError as Error).message}` });
+              });
+            }}
             {...(selectedBookId ? { selectedBookId } : {})}
             onSelect={(bookId) => setSelectedBookId(bookId || undefined)}
             onImport={openEpubPicker}
@@ -511,6 +532,11 @@ export function App() {
         onSave={saveSettings}
         onImport={(theme: ThemeDefinition) => importCustomTheme(theme)}
         onThemesChange={setThemes}
+        {...(desktopSettings ? {
+          desktopSettings,
+          onSaveDesktopShortcut: async (shortcut: string | null) => { setDesktopSettings(await saveDesktopShortcut(shortcut)); },
+          onSaveDesktopAutostart: async (enabled: boolean) => { setDesktopSettings(await saveDesktopAutostart(enabled)); },
+        } : {})}
         onClose={() => setSettingsOpen(false)}
       />}
       {overlayMessage && <div className="loading-overlay" role="status"><span className="loading-dot" />{overlayMessage}</div>}

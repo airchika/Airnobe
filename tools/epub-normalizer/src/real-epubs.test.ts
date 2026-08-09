@@ -5,6 +5,9 @@ import { convertEpubBytes } from "./convert.js";
 
 const run = process.env.RUN_REAL_EPUB_TESTS === "1" ? describe : describe.skip;
 const repository = resolve(import.meta.dirname, "../../..");
+const realEpubDirectory = process.env.AIRNOBE_REAL_EPUB_DIR
+  ? resolve(process.env.AIRNOBE_REAL_EPUB_DIR)
+  : resolve(repository, "epub");
 
 run("local real EPUB regression", () => {
   it("matches the measured mixed-book pairing and native-ruby totals", async () => {
@@ -17,7 +20,7 @@ run("local real EPUB regression", () => {
     let pairs = 0;
     let rubies = 0;
     for (const [name, expectedPairs, expectedRubies] of expected) {
-      const result = await convertEpubBytes(await readFile(resolve(repository, name)), name);
+      const result = await convertEpubBytes(await readFile(resolve(realEpubDirectory, name)), name);
       expect(result.report.metrics.parallelBlockCount, name).toBe(expectedPairs);
       expect(result.report.metrics.sourceRubyCount, name).toBe(expectedRubies);
       expect(result.report.metrics.spacerBlockCount, name).toBeGreaterThan(0);
@@ -39,7 +42,7 @@ run("local real EPUB regression", () => {
   }, 120_000);
 
   it("excludes zjws nav and does not emit a whole-book unpaired warning", async () => {
-    const result = await convertEpubBytes(await readFile(resolve(repository, "zjws.epub")), "zjws.epub");
+    const result = await convertEpubBytes(await readFile(resolve(realEpubDirectory, "zjws.epub")), "zjws.epub");
     expect(result.report.metrics.spineDocumentCount).toBe(result.report.metrics.outputDocumentCount + 1);
     expect(result.report.metrics.textBlockCount).toBe(9_818);
     expect(result.report.metrics.spacerBlockCount).toBeGreaterThan(0);

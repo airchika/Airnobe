@@ -1320,6 +1320,8 @@ rt {
 .settings-panel h3 { margin: 0; font-weight: 500; }
 .settings-panel h2 { font-size: 20px; }
 .settings-panel h3 { margin-bottom: 11px; color: var(--muted); font-size: 14px; }
+.settings-hint { margin: 9px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.desktop-settings-section .shortcut-binding { min-width: 116px; }
 .settings-panel section { padding: 16px 0; border-top: 1px solid var(--line); }
 .settings-panel header button { width: 34px; height: 34px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 22px; }
 

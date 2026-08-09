@@ -4,10 +4,13 @@ import type { ShortcutBinding } from "./reader-settings.js";
 import { matchesShortcut } from "./shortcut-bindings.js";
 import { findSpatialTarget, useSpatialNavigation, type SpatialDirection } from "./spatial-navigation.js";
 import noveliaIcon from "./assets/novelia-icon.svg";
+import type { LibraryFilter } from "./app-state.js";
 
 interface LibraryViewProps {
   books: LibraryBook[];
   selectedBookId?: string;
+  filter: LibraryFilter;
+  onFilterChange(filter: LibraryFilter): void;
   onSelect(bookId: string): void;
   onImport(): void;
   onOpenNovelia?(): void;
@@ -113,11 +116,10 @@ function LibraryDetailLayer({ book, phase, onAnimationComplete }: LibraryDetailL
   </div>;
 }
 
-export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenNovelia, onOpenSettings, onReturnToReading, switchViewShortcut, fullscreenShortcut, onToggleFullscreen, onRead, onUpdate, onDelete = () => {}, keyboardNavigationEnabled = true }: LibraryViewProps) {
+export function LibraryView({ books, selectedBookId, filter, onFilterChange, onSelect, onImport, onOpenNovelia, onOpenSettings, onReturnToReading, switchViewShortcut, fullscreenShortcut, onToggleFullscreen, onRead, onUpdate, onDelete = () => {}, keyboardNavigationEnabled = true }: LibraryViewProps) {
   const rootRef = useRef<HTMLElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const popupReturnFocusRef = useRef<HTMLElement | null>(null);
-  const [filter, setFilter] = useState<CollectionStatus | "all">("all");
   const [sort, setSort] = useState<{ key: SortKey; direction: 1 | -1 }>({ key: "recent", direction: 1 });
   const [actionPopup, setActionPopup] = useState<PopupPosition>();
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -189,10 +191,10 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenN
       if (active !== activeWhenScheduled && active instanceof HTMLElement && rootRef.current?.contains(active)) return;
       if (active instanceof HTMLElement && rootRef.current?.contains(active)) return;
       const item = [...rootRef.current?.querySelectorAll<HTMLElement>("[data-library-book-id]") ?? []].find((element) => element.dataset.libraryBookId === selectedBookId);
-      (item ?? rootRef.current?.querySelector<HTMLElement>("[data-library-filter='all']"))?.focus({ preventScroll: true });
+      (item ?? rootRef.current?.querySelector<HTMLElement>(`[data-library-filter='${filter}']`))?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [keyboardNavigationEnabled, selectedBookId]);
+  }, [filter, keyboardNavigationEnabled, selectedBookId]);
 
   const closePopup = useCallback(() => {
     setStatusMenuOpen(false);
@@ -238,7 +240,7 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenN
 
   const chooseSort = (key: SortKey): void => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
   const sortLabel = (key: SortKey): string => sort.key === key ? (sort.direction === 1 ? " ↑" : " ↓") : "";
-  const activateFilter = (value: CollectionStatus | "all"): void => { if (filter !== value) setFilter(value); };
+  const activateFilter = (value: LibraryFilter): void => { if (filter !== value) onFilterChange(value); };
 
   return <main className="library-app" ref={rootRef}>
     <header className="library-header"><h1>Airnobe</h1><div className="library-header-actions">
@@ -250,7 +252,7 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenN
     <div className="library-grid">
       <nav className="library-filters" aria-label="藏书状态">
         <button type="button" data-spatial-item data-spatial-zone="filters" data-spatial-zone-order="0" data-spatial-row="0" data-library-filter="all" aria-pressed={filter === "all"} onFocus={() => activateFilter("all")} onClick={() => activateFilter("all")}><span>全部</span><b>{books.length}</b></button>
-        {STATUS_ORDER.map((status, index) => <button key={status} type="button" data-spatial-item data-spatial-zone="filters" data-spatial-zone-order="0" data-spatial-row={String(index + 1)} aria-pressed={filter === status} onFocus={() => activateFilter(status)} onClick={() => activateFilter(status)}><span>{STATUS_LABELS[status]}</span><b>{books.filter((book) => book.collectionStatus === status).length}</b></button>)}
+        {STATUS_ORDER.map((status, index) => <button key={status} type="button" data-spatial-item data-spatial-zone="filters" data-spatial-zone-order="0" data-spatial-row={String(index + 1)} data-library-filter={status} aria-pressed={filter === status} onFocus={() => activateFilter(status)} onClick={() => activateFilter(status)}><span>{STATUS_LABELS[status]}</span><b>{books.filter((book) => book.collectionStatus === status).length}</b></button>)}
       </nav>
       <section className="library-list" aria-label="书籍列表">
         <div className="library-list-header">{([ ["title", "书名"], ["status", "状态"], ["recent", "最近打开"] ] as const).map(([key, label]) => <button key={key} type="button" onClick={() => chooseSort(key)} aria-pressed={sort.key === key}>{label}{key === "status" ? <i className="library-sort-slot" aria-hidden="true">{sort.key === key ? (sort.direction === 1 ? "↑" : "↓") : "↑"}</i> : sortLabel(key)}</button>)}</div>

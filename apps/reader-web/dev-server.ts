@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { access, readFile } from "node:fs/promises";
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AIRNOBE_FORMAT_VERSION, BookManifestSchema, type BookManifest } from "@airnobe/book-format";
 import { inspectEpubBytes } from "@airnobe/epub-normalizer";
-import { createServer, type Plugin } from "vite";
+import type { Plugin } from "vite";
 import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { importLibraryBook } from "./library-import.js";
 import { readReadingState, writeReadingState } from "./reading-state-store.js";
@@ -25,11 +25,14 @@ import { readCustomThemes, writeCustomTheme } from "./theme-store.js";
 import { parseReadingPosition, readingProgressSummary, type ReadingPosition } from "./src/reading-state.js";
 import { parseBookmarkDraft } from "./src/bookmarks.js";
 import { parseReaderSettings } from "./src/reader-settings.js";
-import { parseAppState } from "./src/app-state.js";
+import { parseAppState, parseAppStatePatch } from "./src/app-state.js";
 import { BUILTIN_THEMES, parseThemeDefinition } from "./src/themes.js";
 import { downloadNoveliaEpub, NoveliaDownloadError } from "./novelia-download.js";
+import { syncGettingStartedBook } from "./bundled-books-store.js";
 
-const APP_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+const APP_DIRECTORY = process.env.AIRNOBE_APP_DIRECTORY?.trim()
+  ? resolve(process.env.AIRNOBE_APP_DIRECTORY)
+  : dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_DIRECTORY = resolve(APP_DIRECTORY, "../..");
 const LIBRARY_DIRECTORY = process.env.AIRNOBE_LIBRARY_DIRECTORY?.trim()
   ? resolve(process.env.AIRNOBE_LIBRARY_DIRECTORY)
@@ -37,12 +40,16 @@ const LIBRARY_DIRECTORY = process.env.AIRNOBE_LIBRARY_DIRECTORY?.trim()
 const LIBRARY_INDEX_PATH = join(LIBRARY_DIRECTORY, "library.json");
 const SETTINGS_PATH = join(LIBRARY_DIRECTORY, "user.json");
 const APP_STATE_PATH = join(LIBRARY_DIRECTORY, "app-state.json");
+const BUNDLED_GETTING_STARTED_EPUB = process.env.AIRNOBE_BUNDLED_GETTING_STARTED_EPUB?.trim()
+  ? resolve(process.env.AIRNOBE_BUNDLED_GETTING_STARTED_EPUB)
+  : resolve(REPOSITORY_DIRECTORY, "apps/desktop/src-tauri/resources/airnobe-getting-started.epub");
 const THEMES_DIRECTORY = join(LIBRARY_DIRECTORY, "themes");
 const MAX_EPUB_BYTES = 512 * 1024 * 1024;
 const MAX_THEME_BYTES = 64 * 1024;
 const MAX_BOOKMARK_BYTES = 16 * 1024;
 const MAX_APP_STATE_BYTES = 4 * 1024;
 const MAX_NOVELIA_REQUEST_BYTES = 4 * 1024;
+const API_TOKEN = process.env.AIRNOBE_API_TOKEN?.trim() || undefined;
 const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let mutationQueue: Promise<void> = Promise.resolve();
 const upstreamDispatcher = new EnvHttpProxyAgent();
@@ -406,6 +413,19 @@ async function updateAppState(request: IncomingMessage, response: ServerResponse
   sendJson(response, 200, state);
 }
 
+async function patchAppState(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const patch = parseAppStatePatch(await readRequestJson(request, MAX_APP_STATE_BYTES, "应用状态 JSON 超过 4 KB。"));
+  if (!patch) throw new HttpError(400, "应用状态修改内容无效。");
+  if (patch.lastReadingBookId) {
+    const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
+    if (!index.books.some((book) => book.id === patch.lastReadingBookId)) throw new HttpError(404, "最后阅读的书籍不存在。");
+  }
+  const current = await readAppState(APP_STATE_PATH);
+  const state = { ...current, ...patch };
+  await writeAppState(APP_STATE_PATH, state);
+  sendJson(response, 200, state);
+}
+
 async function sendThemes(response: ServerResponse): Promise<void> {
   sendJson(response, 200, {
     version: 1,
@@ -427,110 +447,194 @@ async function importTheme(themeId: string, request: IncomingMessage, response: 
   sendJson(response, 200, { theme, builtin: false });
 }
 
-function localBookApi(): Plugin {
+function applyCors(response: ServerResponse): void {
+  response.setHeader("access-control-allow-origin", "*");
+  response.setHeader("access-control-allow-methods", "GET, PUT, POST, PATCH, DELETE, OPTIONS");
+  response.setHeader("access-control-allow-headers", "authorization, content-type, x-airnobe-filename");
+  response.setHeader("access-control-expose-headers", "x-airnobe-filename, content-disposition");
+}
+
+function isAuthorized(request: IncomingMessage, url: URL): boolean {
+  if (!API_TOKEN) return true;
+  return request.headers.authorization === `Bearer ${API_TOKEN}` || url.searchParams.get("token") === API_TOKEN;
+}
+
+export async function handleLocalApi(
+  request: IncomingMessage,
+  response: ServerResponse,
+  next: () => void,
+): Promise<void> {
+  const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  if (!url.pathname.startsWith("/api/")) {
+    next();
+    return;
+  }
+  applyCors(response);
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+  if (!isAuthorized(request, url)) {
+    sendJson(response, 401, { error: "本地服务访问令牌无效。" });
+    return;
+  }
+  try {
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      sendJson(response, 200, { status: "ok" });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/import-epub") {
+      await enqueueMutation(() => importEpub(request, response));
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/novelia/epub") {
+      await sendNoveliaEpub(request, response);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/library") {
+      await sendLibrary(response);
+      return;
+    }
+    const libraryBookMatch = /^\/api\/library\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
+    if (request.method === "PATCH" && libraryBookMatch) {
+      await enqueueMutation(() => updateLibraryBook(libraryBookMatch[1] as string, request, response));
+      return;
+    }
+    if (request.method === "DELETE" && libraryBookMatch) {
+      await enqueueMutation(() => deleteStoredBook(libraryBookMatch[1] as string, response));
+      return;
+    }
+    const reimportBookMatch = /^\/api\/library\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/reimport$/i.exec(url.pathname);
+    if (request.method === "POST" && reimportBookMatch) {
+      await enqueueMutation(() => reimportStoredBook(reimportBookMatch[1] as string, response));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/settings") {
+      await sendReaderSettings(response);
+      return;
+    }
+    if (request.method === "PUT" && url.pathname === "/api/settings") {
+      await enqueueMutation(() => updateReaderSettings(request, response));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/app-state") {
+      await sendAppState(response);
+      return;
+    }
+    if (request.method === "PUT" && url.pathname === "/api/app-state") {
+      await enqueueMutation(() => updateAppState(request, response));
+      return;
+    }
+    if (request.method === "PATCH" && url.pathname === "/api/app-state") {
+      await enqueueMutation(() => patchAppState(request, response));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/themes") {
+      await sendThemes(response);
+      return;
+    }
+    const themeMatch = /^\/api\/themes\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/.exec(url.pathname);
+    if (request.method === "PUT" && themeMatch) {
+      await enqueueMutation(() => importTheme(themeMatch[1] as string, request, response));
+      return;
+    }
+    const bookMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
+    if (request.method === "GET" && bookMatch) {
+      await sendBookBundle(bookMatch[1] as string, response);
+      return;
+    }
+    const readingStateMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/reading-state$/i.exec(url.pathname);
+    if (request.method === "PUT" && readingStateMatch) {
+      await enqueueMutation(() => updateReadingState(readingStateMatch[1] as string, request, response));
+      return;
+    }
+    const bookmarksMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/bookmarks$/i.exec(url.pathname);
+    if (request.method === "POST" && bookmarksMatch) {
+      await enqueueMutation(() => createBookmark(bookmarksMatch[1] as string, request, response));
+      return;
+    }
+    const bookmarkMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/bookmarks\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(url.pathname);
+    if (request.method === "DELETE" && bookmarkMatch) {
+      await enqueueMutation(() => removeBookmark(bookmarkMatch[1] as string, bookmarkMatch[2] as string, response));
+      return;
+    }
+    const assetMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/assets\/([^/]+)$/i.exec(url.pathname);
+    if (request.method === "GET" && assetMatch) {
+      await sendAsset(assetMatch[1] as string, decodeURIComponent(assetMatch[2] as string), response);
+      return;
+    }
+    const sourceMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/source$/i.exec(url.pathname);
+    if (request.method === "GET" && sourceMatch) {
+      await sendSourceEpub(sourceMatch[1] as string, response);
+      return;
+    }
+    sendJson(response, 404, { error: "本地服务接口不存在。" });
+  } catch (error) {
+    const status = error instanceof HttpError || error instanceof NoveliaDownloadError ? error.status : 500;
+    sendJson(response, status, { error: (error as Error).message });
+  }
+}
+
+export function localBookApi(): Plugin {
   return {
     name: "airnobe-local-book-api",
     configureServer(server) {
-      server.middlewares.use(async (request, response, next) => {
-        const url = new URL(request.url ?? "/", "http://127.0.0.1");
-        try {
-          if (request.method === "POST" && url.pathname === "/api/import-epub") {
-            await enqueueMutation(() => importEpub(request, response));
-            return;
-          }
-          if (request.method === "POST" && url.pathname === "/api/novelia/epub") {
-            await sendNoveliaEpub(request, response);
-            return;
-          }
-          if (request.method === "GET" && url.pathname === "/api/library") {
-            await sendLibrary(response);
-            return;
-          }
-          const libraryBookMatch = /^\/api\/library\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
-          if (request.method === "PATCH" && libraryBookMatch) {
-            await enqueueMutation(() => updateLibraryBook(libraryBookMatch[1] as string, request, response));
-            return;
-          }
-          if (request.method === "DELETE" && libraryBookMatch) {
-            await enqueueMutation(() => deleteStoredBook(libraryBookMatch[1] as string, response));
-            return;
-          }
-          const reimportBookMatch = /^\/api\/library\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/reimport$/i.exec(url.pathname);
-          if (request.method === "POST" && reimportBookMatch) {
-            await enqueueMutation(() => reimportStoredBook(reimportBookMatch[1] as string, response));
-            return;
-          }
-          if (request.method === "GET" && url.pathname === "/api/settings") {
-            await sendReaderSettings(response);
-            return;
-          }
-          if (request.method === "PUT" && url.pathname === "/api/settings") {
-            await enqueueMutation(() => updateReaderSettings(request, response));
-            return;
-          }
-          if (request.method === "GET" && url.pathname === "/api/app-state") {
-            await sendAppState(response);
-            return;
-          }
-          if (request.method === "PUT" && url.pathname === "/api/app-state") {
-            await enqueueMutation(() => updateAppState(request, response));
-            return;
-          }
-          if (request.method === "GET" && url.pathname === "/api/themes") {
-            await sendThemes(response);
-            return;
-          }
-          const themeMatch = /^\/api\/themes\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/.exec(url.pathname);
-          if (request.method === "PUT" && themeMatch) {
-            await enqueueMutation(() => importTheme(themeMatch[1] as string, request, response));
-            return;
-          }
-          const bookMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname);
-          if (request.method === "GET" && bookMatch) {
-            await sendBookBundle(bookMatch[1] as string, response);
-            return;
-          }
-          const readingStateMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/reading-state$/i.exec(url.pathname);
-          if (request.method === "PUT" && readingStateMatch) {
-            await enqueueMutation(() => updateReadingState(readingStateMatch[1] as string, request, response));
-            return;
-          }
-          const bookmarksMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/bookmarks$/i.exec(url.pathname);
-          if (request.method === "POST" && bookmarksMatch) {
-            await enqueueMutation(() => createBookmark(bookmarksMatch[1] as string, request, response));
-            return;
-          }
-          const bookmarkMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/bookmarks\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(url.pathname);
-          if (request.method === "DELETE" && bookmarkMatch) {
-            await enqueueMutation(() => removeBookmark(bookmarkMatch[1] as string, bookmarkMatch[2] as string, response));
-            return;
-          }
-          const assetMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/assets\/([^/]+)$/i.exec(url.pathname);
-          if (request.method === "GET" && assetMatch) {
-            await sendAsset(assetMatch[1] as string, decodeURIComponent(assetMatch[2] as string), response);
-            return;
-          }
-          const sourceMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/source$/i.exec(url.pathname);
-          if (request.method === "GET" && sourceMatch) {
-            await sendSourceEpub(sourceMatch[1] as string, response);
-            return;
-          }
-          next();
-        } catch (error) {
-          const status = error instanceof HttpError || error instanceof NoveliaDownloadError ? error.status : 500;
-          sendJson(response, status, { error: (error as Error).message });
-        }
-      });
+      server.middlewares.use((request, response, next) => void handleLocalApi(request, response, next));
     },
   };
 }
 
-const server = await createServer({
-  root: APP_DIRECTORY,
-  plugins: [localBookApi()],
-  server: { host: "127.0.0.1", strictPort: true },
-});
+async function startSidecar(): Promise<void> {
+  const libraryWasMissing = await access(LIBRARY_INDEX_PATH).then(() => false, () => true);
+  await syncGettingStartedBook({
+    libraryDirectory: LIBRARY_DIRECTORY,
+    epubPath: BUNDLED_GETTING_STARTED_EPUB,
+    libraryWasMissing,
+  }).catch((error) => console.error(`Airnobe Start 同步失败：${(error as Error).message}`));
+  const server = createHttpServer((request, response) => {
+    void handleLocalApi(request, response, () => {
+      sendJson(response, 404, { error: "本地服务接口不存在。" });
+    });
+  });
+  const port = Number(process.env.AIRNOBE_API_PORT ?? 0);
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(Number.isInteger(port) && port >= 0 && port <= 65535 ? port : 0, "127.0.0.1", () => resolveListen());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("无法确定本地服务端口。");
+  process.stdout.write(`${JSON.stringify({ event: "ready", port: address.port })}\n`);
+  const stop = (): void => { server.close(() => process.exit(0)); };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
 
-await server.listen();
-server.printUrls();
-console.log(`转换结果目录：${LIBRARY_DIRECTORY}`);
+async function startDevelopmentServer(): Promise<void> {
+  const libraryWasMissing = await access(LIBRARY_INDEX_PATH).then(() => false, () => true);
+  await syncGettingStartedBook({
+    libraryDirectory: LIBRARY_DIRECTORY,
+    epubPath: BUNDLED_GETTING_STARTED_EPUB,
+    libraryWasMissing,
+  }).catch((error) => console.warn(`Airnobe Start 同步失败：${(error as Error).message}`));
+  const viteModuleName = "vite";
+  const { createServer } = await import(viteModuleName);
+  const server = await createServer({
+    root: APP_DIRECTORY,
+    plugins: [localBookApi()],
+    server: { host: "127.0.0.1", strictPort: true },
+  });
+  await server.listen();
+  server.printUrls();
+  console.log(`转换结果目录：${LIBRARY_DIRECTORY}`);
+}
+
+async function main(): Promise<void> {
+  if (process.argv.includes("--sidecar")) await startSidecar();
+  else await startDevelopmentServer();
+}
+
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

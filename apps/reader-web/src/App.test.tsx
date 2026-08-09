@@ -51,6 +51,29 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "打开转换结果" })).not.toBeInTheDocument();
   });
 
+  it("restores and persists the last active library filter", async () => {
+    const user = userEvent.setup();
+    const patches: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/app-state" && init?.method === "PATCH") {
+        patches.push(JSON.parse(String(init.body)));
+        return json({ version: 2, lastReadingBookId: null, libraryFilter: "wish" });
+      }
+      if (url === "/api/app-state") return json({ version: 2, lastReadingBookId: null, libraryFilter: "reading" });
+      if (url === "/api/library") return json({ version: 1, books: [libraryBook] });
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    const reading = await screen.findByRole("button", { name: "在看0" });
+    expect(reading).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("此分类暂无书籍")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "想看1" }));
+    expect(await screen.findByRole("button", { name: "示例书籍" })).toBeInTheDocument();
+    expect(patches).toContainEqual({ libraryFilter: "wish" });
+  });
+
   it("restores the most recently read book from the library with the shared shortcut", async () => {
     const readBook = { ...libraryBook, readingProgress: { progress: 0.4, chapterLabel: "第二章", updatedAt: "2026-08-08T12:00:00.000Z" } };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -73,7 +96,7 @@ describe("App", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
-      if (url === "/api/app-state" && init?.method === "PUT") return json({ error: "disk full" }, 500);
+      if (url === "/api/app-state" && init?.method === "PATCH") return json({ error: "disk full" }, 500);
       if (url === "/api/app-state") return json({ version: 1, lastReadingBookId: bookId });
       if (url === "/api/library") return json({ version: 1, books: [readBook] });
       if (url === `/api/books/${bookId}`) return json({ book: demo.book, documents: demo.documents, readingState: demo.readingState, bookmarkState: demo.bookmarkState });
@@ -96,7 +119,7 @@ describe("App", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
-      if (url === "/api/app-state" && init?.method === "PUT") return json({ version: 1, lastReadingBookId: otherBookId });
+      if (url === "/api/app-state" && init?.method === "PATCH") return json({ version: 2, lastReadingBookId: otherBookId, libraryFilter: "all" });
       if (url === "/api/app-state") return json({ version: 1, lastReadingBookId: bookId });
       if (url === "/api/library") return json({ version: 1, books: [remembered, other] });
       if (url === `/api/books/${bookId}`) return json({ error: "damaged book" }, 500);
