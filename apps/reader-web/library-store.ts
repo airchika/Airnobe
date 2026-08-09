@@ -215,6 +215,7 @@ export function createLibraryEntry(args: {
   sourceFileName: string;
   sourceSize: number;
   annotationStatus: AnnotationStatus;
+  initialCollectionStatus?: CollectionStatus;
   now?: string;
   previous?: LibraryEntry;
 }): LibraryEntry {
@@ -230,7 +231,7 @@ export function createLibraryEntry(args: {
     contentKind: contentKindFor(args.book),
     coverAssetId: args.book.coverAssetId ?? null,
     annotationStatus: args.annotationStatus,
-    collectionStatus: args.previous?.collectionStatus ?? "wish",
+    collectionStatus: args.previous?.collectionStatus ?? args.initialCollectionStatus ?? "wish",
     note: args.previous?.note ?? "",
     addedAt: args.previous?.addedAt ?? now,
     updatedAt: now,

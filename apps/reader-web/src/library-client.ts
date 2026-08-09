@@ -1,3 +1,6 @@
+import { apiFetch, apiUrl } from "./api-transport.js";
+import type { ReadingProgressSummary } from "./reading-state.js";
+
 export type CollectionStatus = "wish" | "reading" | "completed" | "on-hold" | "dropped";
 export type AnnotationStatus = "not-applicable" | "ready" | "failed";
 export type ContentKind = "chinese" | "japanese" | "parallel" | "mixed" | "unknown";
@@ -69,7 +72,7 @@ async function responseJson(response: Response): Promise<unknown> {
 }
 
 export async function loadLibrary(): Promise<LibraryBook[]> {
-  const value = await responseJson(await fetch("/api/library"));
+  const value = await responseJson(await apiFetch("/api/library"));
   if (typeof value !== "object" || value === null) throw new Error("书库响应无效。");
   const response = value as Partial<LibraryResponse>;
   if (response.version !== 1 || !Array.isArray(response.books) || !response.books.every(isLibraryBook)) {
@@ -82,7 +85,7 @@ export async function updateLibraryBook(
   bookId: string,
   patch: { collectionStatus?: CollectionStatus; note?: string },
 ): Promise<LibraryBook> {
-  const value = await responseJson(await fetch(`/api/library/books/${bookId}`, {
+  const value = await responseJson(await apiFetch(`/api/library/books/${bookId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
@@ -97,7 +100,7 @@ export interface ReimportLibraryBookResult {
 }
 
 export async function reimportLibraryBook(bookId: string): Promise<ReimportLibraryBookResult> {
-  const value = await responseJson(await fetch(`/api/library/books/${bookId}/reimport`, { method: "POST" }));
+  const value = await responseJson(await apiFetch(`/api/library/books/${bookId}/reimport`, { method: "POST" }));
   if (typeof value !== "object" || value === null || (value as { bookId?: unknown }).bookId !== bookId) {
     throw new Error("本地服务返回了无效的重新导入结果。");
   }
@@ -107,7 +110,7 @@ export async function reimportLibraryBook(bookId: string): Promise<ReimportLibra
 }
 
 export async function deleteLibraryBook(bookId: string): Promise<void> {
-  const value = await responseJson(await fetch(`/api/library/books/${bookId}`, { method: "DELETE" }));
+  const value = await responseJson(await apiFetch(`/api/library/books/${bookId}`, { method: "DELETE" }));
   if (typeof value !== "object" || value === null || (value as { deletedBookId?: unknown }).deletedBookId !== bookId) {
     throw new Error("本地服务返回了无效的删除结果。");
   }
@@ -115,11 +118,10 @@ export async function deleteLibraryBook(bookId: string): Promise<void> {
 
 export function coverUrl(book: LibraryBook): string | undefined {
   return book.coverAssetId
-    ? `/api/books/${book.id}/assets/${encodeURIComponent(book.coverAssetId)}`
+    ? apiUrl(`/api/books/${book.id}/assets/${encodeURIComponent(book.coverAssetId)}`)
     : undefined;
 }
 
 export function sourceEpubUrl(book: LibraryBook): string {
-  return `/api/books/${book.id}/source`;
+  return apiUrl(`/api/books/${book.id}/source`);
 }
-import type { ReadingProgressSummary } from "./reading-state.js";

@@ -25,11 +25,19 @@ describe("app state store", () => {
     const directory = await mkdtemp(join(tmpdir(), "airnobe-app-state-"));
     directories.push(directory);
     const statePath = join(directory, "nested", "app-state.json");
-    const state = { version: 1 as const, lastReadingBookId: "01234567-89ab-4cde-8fab-0123456789ab" };
+    const state = { version: 2 as const, lastReadingBookId: "01234567-89ab-4cde-8fab-0123456789ab", libraryFilter: "reading" as const };
     await writeAppState(statePath, state);
     expect(JSON.parse(await readFile(statePath, "utf8"))).toEqual(state);
     await expect(readAppState(statePath)).resolves.toEqual(state);
-    await writeAppState(statePath, { version: 1, lastReadingBookId: null });
-    await expect(readAppState(statePath)).resolves.toEqual({ version: 1, lastReadingBookId: null });
+    await writeAppState(statePath, { version: 2, lastReadingBookId: null, libraryFilter: "all" });
+    await expect(readAppState(statePath)).resolves.toEqual({ version: 2, lastReadingBookId: null, libraryFilter: "all" });
+  });
+
+  it("migrates version 1 without losing the last reading book", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "airnobe-app-state-"));
+    directories.push(directory);
+    const statePath = join(directory, "app-state.json");
+    await writeFile(statePath, JSON.stringify({ version: 1, lastReadingBookId: "01234567-89ab-4cde-8fab-0123456789ab" }), "utf8");
+    await expect(readAppState(statePath)).resolves.toEqual({ version: 2, lastReadingBookId: "01234567-89ab-4cde-8fab-0123456789ab", libraryFilter: "all" });
   });
 });

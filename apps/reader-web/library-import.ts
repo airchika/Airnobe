@@ -23,6 +23,7 @@ import {
   readLibraryIndex,
   writeLibraryIndexAtomically,
   type AnnotationStatus,
+  type CollectionStatus,
   type LibraryEntry,
 } from "./library-store.js";
 
@@ -129,6 +130,7 @@ export async function importLibraryBook(args: {
   bytes: Uint8Array;
   fileName: string;
   replaceBookId?: string;
+  initialCollectionStatus?: CollectionStatus;
   tokenizerFactory?: () => Promise<TokenizerLike>;
   now?: string;
 }): Promise<ImportResult> {
@@ -164,6 +166,7 @@ export async function importLibraryBook(args: {
       sourceFileName: basename(args.fileName),
       sourceSize: args.bytes.byteLength,
       annotationStatus: prepared.annotationStatus,
+      ...(args.initialCollectionStatus ? { initialCollectionStatus: args.initialCollectionStatus } : {}),
       ...(args.now ? { now: args.now } : {}),
       ...(previous ? { previous } : {}),
     });

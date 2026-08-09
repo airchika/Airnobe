@@ -9,6 +9,7 @@ import {
   type ConversionReport,
   type InlineNode,
 } from "@airnobe/book-format";
+import { apiFetch, apiUrl } from "./api-transport.js";
 import {
   EMPTY_READING_STATE,
   parseReadingState,
@@ -181,7 +182,7 @@ async function responseJson(response: Response): Promise<unknown> {
 
 export async function loadBookFromApi(bookId: string): Promise<LoadedBook> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
-  const value = await responseJson(await fetch(`/api/books/${bookId}`)) as BookBundle;
+  const value = await responseJson(await apiFetch(`/api/books/${bookId}`)) as BookBundle;
   const loaded = createLoadedBook(
     value.book,
     value.documents,
@@ -189,7 +190,7 @@ export async function loadBookFromApi(bookId: string): Promise<LoadedBook> {
     value.readingState,
     value.bookmarkState,
     "本地 EPUB",
-    (assetId) => `/api/books/${bookId}/assets/${encodeURIComponent(assetId)}`,
+    (assetId) => apiUrl(`/api/books/${bookId}/assets/${encodeURIComponent(assetId)}`),
     () => {},
   );
   loaded.libraryBookId = bookId;
@@ -213,7 +214,7 @@ export async function importEpubFile(file: File, resolution?: DuplicateResolutio
     headers["x-airnobe-duplicate-action"] = resolution.action;
     if (resolution.action === "replace") headers["x-airnobe-replace-book-id"] = resolution.bookId;
   }
-  const value = await responseJson(await fetch("/api/import-epub", {
+  const value = await responseJson(await apiFetch("/api/import-epub", {
     method: "POST",
     headers,
     body: file,
@@ -241,7 +242,7 @@ export async function importEpubFile(file: File, resolution?: DuplicateResolutio
 
 export async function saveReadingPosition(bookId: string, position: ReadingPosition | null): Promise<ReadingState> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
-  const value = await responseJson(await fetch(`/api/books/${bookId}/reading-state`, {
+  const value = await responseJson(await apiFetch(`/api/books/${bookId}/reading-state`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ position }),
@@ -253,7 +254,7 @@ export async function saveReadingPosition(bookId: string, position: ReadingPosit
 
 export async function addBookBookmark(bookId: string, draft: BookmarkDraft): Promise<BookmarkMutationResult> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
-  const value = await responseJson(await fetch(`/api/books/${bookId}/bookmarks`, {
+  const value = await responseJson(await apiFetch(`/api/books/${bookId}/bookmarks`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(draft),
@@ -267,7 +268,7 @@ export async function addBookBookmark(bookId: string, draft: BookmarkDraft): Pro
 
 export async function deleteBookBookmark(bookId: string, bookmarkId: string): Promise<BookmarkState> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
-  const value = await responseJson(await fetch(`/api/books/${bookId}/bookmarks/${encodeURIComponent(bookmarkId)}`, { method: "DELETE" }));
+  const value = await responseJson(await apiFetch(`/api/books/${bookId}/bookmarks/${encodeURIComponent(bookmarkId)}`, { method: "DELETE" }));
   const state = parseBookmarkState(value);
   if (!state) throw new Error("书签服务返回了无效状态。");
   return state;

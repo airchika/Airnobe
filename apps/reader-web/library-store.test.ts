@@ -95,6 +95,21 @@ describe("library store", () => {
     expect(replacement.updatedAt).not.toBe(previous.updatedAt);
   });
 
+  it("supports an internal initial collection status without changing the public default", () => {
+    const normal = entry();
+    const book = structuredClone(createDemoBook().book);
+    book.source.sha256 = "c".repeat(64);
+    const bundled = createLibraryEntry({
+      book,
+      sourceFileName: "Airnobe Start.epub",
+      sourceSize: 456,
+      annotationStatus: "ready",
+      initialCollectionStatus: "reading",
+    });
+    expect(normal.collectionStatus).toBe("wish");
+    expect(bundled.collectionStatus).toBe("reading");
+  });
+
   it("updates only mutable library state and refreshes updatedAt", () => {
     const original = entry();
     const result = updateLibraryEntry(

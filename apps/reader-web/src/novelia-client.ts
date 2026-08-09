@@ -1,3 +1,5 @@
+import { apiFetch } from "./api-transport.js";
+
 async function responseError(response: Response): Promise<Error> {
   try {
     const value = await response.json() as { error?: unknown };
@@ -20,7 +22,7 @@ function responseFileName(response: Response): string {
 }
 
 export async function downloadNoveliaEpubFile(url: string): Promise<File> {
-  const response = await fetch("/api/novelia/epub", {
+  const response = await apiFetch("/api/novelia/epub", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ url }),

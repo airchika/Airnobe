@@ -1,4 +1,5 @@
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, isThemeId } from "./themes.js";
+import { apiFetch } from "./api-transport.js";
 
 export const NAVIGATION_SHORTCUT_ACTIONS = ["topBackward", "topForward", "bottomBackward", "bottomForward", "pageUp", "pageDown"] as const;
 export const DISPLAY_SHORTCUT_ACTIONS = ["toggleJapanese", "toggleAssistedRuby", "toggleKatakanaRomaji", "toggleSidebar", "toggleFullscreen", "addBookmark", "returnLibrary"] as const;
@@ -162,5 +163,5 @@ export function parseReaderSettings(value: unknown): ReaderSettings | undefined 
 function cloneShortcuts(shortcuts: ShortcutMap): ShortcutMap { return Object.fromEntries(SHORTCUT_ACTIONS.map((action) => [action, shortcuts[action] ? { ...shortcuts[action] } : null])) as ShortcutMap; }
 export function cloneReaderSettings(settings: ReaderSettings): ReaderSettings { return { version: 13, navigation: { ...settings.navigation }, shortcuts: cloneShortcuts(settings.shortcuts), pageTransitions: settings.pageTransitions, appearance: structuredClone(settings.appearance) }; }
 async function settingsResponse(response: Response): Promise<ReaderSettings> { let value: unknown; try { value = await response.json(); } catch { throw new Error("阅读设置服务返回了无效响应。"); } if (!response.ok) throw new Error(typeof value === "object" && value && "error" in value ? String((value as { error: unknown }).error) : `阅读设置请求失败（${response.status}）。`); const settings = parseReaderSettings(value); if (!settings) throw new Error("阅读设置服务返回了无效设置。"); return settings; }
-export async function loadReaderSettings(): Promise<ReaderSettings> { return settingsResponse(await fetch("/api/settings")); }
-export async function saveReaderSettings(settings: ReaderSettings): Promise<ReaderSettings> { return settingsResponse(await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) })); }
+export async function loadReaderSettings(): Promise<ReaderSettings> { return settingsResponse(await apiFetch("/api/settings")); }
+export async function saveReaderSettings(settings: ReaderSettings): Promise<ReaderSettings> { return settingsResponse(await apiFetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) })); }
