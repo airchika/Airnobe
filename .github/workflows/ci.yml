@@ -42,6 +42,9 @@ jobs:
       - name: Prepare fonts
         run: npm run setup:fonts
 
+      - name: Verify release version
+        run: npm run verify:version
+
       - name: Typecheck
         run: npm run typecheck
 

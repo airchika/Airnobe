@@ -15,6 +15,7 @@
     "tools/*"
   ],
   "scripts": {
+    "verify:version": "node scripts/check-release-version.mjs",
     "setup:fonts": "node scripts/setup-fonts.mjs",
     "build": "npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && npm run build -w @airnobe/furigana && npm run build -w @airnobe/reader-web",
     "typecheck": "npm run typecheck -w @airnobe/book-format && npm run build -w @airnobe/book-format && npm run typecheck -w @airnobe/epub-normalizer && npm run build -w @airnobe/epub-normalizer && npm run typecheck -w @airnobe/furigana && npm run build -w @airnobe/furigana && npm run typecheck -w @airnobe/reader-web",

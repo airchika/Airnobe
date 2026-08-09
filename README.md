@@ -2,7 +2,7 @@
 
 Airnobe 是面向 Windows 的中日双语 EPUB 轻小说书库与阅读器。它将 EPUB 转换为统一的类型化内容结构，在同一阅读块中保留中文译文、日文原文、出版社 ruby、程序振假名和片假名罗马音。
 
-> 当前仍处于开发测试阶段。本仓库暂不提供可直接安装的正式版本。
+> 当前仍处于公开测试阶段，可从 [GitHub Releases](https://github.com/airchika/Airnobe/releases) 下载 Windows x64 安装器。
 
 ## 主要功能
 
@@ -13,6 +13,18 @@ Airnobe 是面向 Windows 的中日双语 EPUB 轻小说书库与阅读器。它
 - 浅色、深色和跟随系统主题，以及安全的五色主题 JSON 导入。
 - Tauri 2 Windows 桌面封装、系统托盘、全局显示/隐藏快捷键和开机静默启动。
 - 首次创建书库时自动加入中日双语教程《Airnobe Start》。
+
+## 下载与安装
+
+Airnobe 目前只提供 Windows 10/11 x64 的 NSIS 安装器，不提供便携版、MSI 或自动更新。安装器按当前用户安装到 `%LOCALAPPDATA%`，无需管理员权限。
+
+当前测试版尚未进行商业代码签名，Windows SmartScreen 可能显示未知发布者。运行前请下载同一 Release 中的 `SHA256SUMS.txt`，并在 PowerShell 中核对：
+
+```powershell
+Get-FileHash .\Airnobe_0.1.0_x64-setup.exe -Algorithm SHA256
+```
+
+以后发布新版时，从 [Releases](https://github.com/airchika/Airnobe/releases) 下载新版安装器并覆盖安装即可。书库保存在主程序同目录的 `AirnobeLibrary/`；覆盖安装和卸载程序都会保留该目录，重新安装后可继续使用。重要书籍仍建议自行备份。
 
 ## 开发环境
 
