@@ -310,6 +310,9 @@ fn set_desktop_shortcut(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_window(app)
+        }))
         .manage(DesktopRuntime::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -328,9 +331,6 @@ pub fn run() {
                 })
                 .build(),
         )
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_window(app)
-        }))
         .invoke_handler(tauri::generate_handler![
             desktop_backend_connection,
             desktop_settings,
