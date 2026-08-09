@@ -14,8 +14,13 @@
     "@airnobe/epub-normalizer": "0.1.0",
     "@airnobe/furigana": "0.1.0",
     "@tanstack/react-virtual": "^3.14.9",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "undici": "^7.29.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

@@ -5,14 +5,20 @@ interface InlineContentProps {
   nodes: InlineNode[];
   showAssistedRuby: boolean;
   showKatakanaRomaji: boolean;
+  assistedRubyPhase?: RubyVisibilityPhase | undefined;
+  katakanaRomajiPhase?: RubyVisibilityPhase | undefined;
   assetUrlById: Map<string, string>;
   onInternalLink(target: Extract<LinkTarget, { kind: "internal" }>): void;
 }
+
+export type RubyVisibilityPhase = "hidden" | "expanding" | "entering" | "visible" | "fading" | "collapsing";
 
 export function InlineContent({
   nodes,
   showAssistedRuby,
   showKatakanaRomaji,
+  assistedRubyPhase,
+  katakanaRomajiPhase,
   assetUrlById,
   onInternalLink,
 }: InlineContentProps): ReactNode {
@@ -25,11 +31,16 @@ export function InlineContent({
         const visible = node.readingType === "romaji"
           ? showKatakanaRomaji
           : node.origin === "source" || showAssistedRuby;
+        const phase = node.origin === "source"
+          ? "visible"
+          : node.readingType === "romaji"
+            ? katakanaRomajiPhase ?? (showKatakanaRomaji ? "visible" : "hidden")
+            : assistedRubyPhase ?? (showAssistedRuby ? "visible" : "hidden");
         return (
           <Fragment key={key}>
             {node.segments.map((segment, segmentIndex) => (
               <ruby
-                className={`ruby ruby--${node.origin}${node.readingType === "romaji" ? " ruby--romaji" : ""}${visible ? "" : " ruby--hidden"}`}
+                className={`ruby ruby--${node.origin}${node.readingType === "romaji" ? " ruby--romaji" : ""} ruby--${phase}`}
                 data-ruby-origin={node.origin}
                 data-ruby-reading-type={node.readingType}
                 key={`${key}-${segmentIndex}`}
@@ -46,6 +57,8 @@ export function InlineContent({
             nodes={node.children}
             showAssistedRuby={showAssistedRuby}
             showKatakanaRomaji={showKatakanaRomaji}
+            assistedRubyPhase={assistedRubyPhase}
+            katakanaRomajiPhase={katakanaRomajiPhase}
             assetUrlById={assetUrlById}
             onInternalLink={onInternalLink}
           />
@@ -68,6 +81,8 @@ export function InlineContent({
             nodes={node.children}
             showAssistedRuby={showAssistedRuby}
             showKatakanaRomaji={showKatakanaRomaji}
+            assistedRubyPhase={assistedRubyPhase}
+            katakanaRomajiPhase={katakanaRomajiPhase}
             assetUrlById={assetUrlById}
             onInternalLink={onInternalLink}
           />

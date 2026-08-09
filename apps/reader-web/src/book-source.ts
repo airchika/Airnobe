@@ -15,6 +15,13 @@ import {
   type ReadingPosition,
   type ReadingState,
 } from "./reading-state.js";
+import {
+  EMPTY_BOOKMARK_STATE,
+  parseBookmarkState,
+  type BookmarkDraft,
+  type BookmarkMutationResult,
+  type BookmarkState,
+} from "./bookmarks.js";
 
 export interface LoadedBook {
   book: BookManifest;
@@ -24,6 +31,7 @@ export interface LoadedBook {
   report?: ConversionReport;
   libraryBookId?: string;
   readingState: ReadingState;
+  bookmarkState: BookmarkState;
   sourceLabel: string;
   sourceEpubUrl?: string;
   dispose(): void;
@@ -49,6 +57,7 @@ interface BookBundle {
   documents: unknown;
   report?: unknown;
   readingState?: unknown;
+  bookmarkState?: unknown;
 }
 
 function normalizeRelativePath(value: string): string {
@@ -128,6 +137,7 @@ function createLoadedBook(
   documentValues: unknown,
   reportValue: unknown,
   readingStateValue: unknown,
+  bookmarkStateValue: unknown,
   sourceLabel: string,
   assetUrl: (assetId: string) => string,
   dispose: () => void,
@@ -139,6 +149,7 @@ function createLoadedBook(
   if (graphErrors.length > 0) throw new Error(`书籍引用校验失败：\n${graphErrors.join("\n")}`);
   const report = reportValue === undefined ? undefined : ConversionReportSchema.parse(reportValue);
   const readingState = parseReadingState(readingStateValue) ?? structuredClone(EMPTY_READING_STATE);
+  const bookmarkState = parseBookmarkState(bookmarkStateValue) ?? structuredClone(EMPTY_BOOKMARK_STATE);
   return {
     book,
     documents,
@@ -146,6 +157,7 @@ function createLoadedBook(
     assetUrlById: new Map(book.assets.map((asset) => [asset.id, assetUrl(asset.id)])),
     ...(report ? { report } : {}),
     readingState,
+    bookmarkState,
     sourceLabel,
     dispose,
   };
@@ -175,6 +187,7 @@ export async function loadBookFromApi(bookId: string): Promise<LoadedBook> {
     value.documents,
     value.report,
     value.readingState,
+    value.bookmarkState,
     "本地 EPUB",
     (assetId) => `/api/books/${bookId}/assets/${encodeURIComponent(assetId)}`,
     () => {},
@@ -238,6 +251,28 @@ export async function saveReadingPosition(bookId: string, position: ReadingPosit
   return state;
 }
 
+export async function addBookBookmark(bookId: string, draft: BookmarkDraft): Promise<BookmarkMutationResult> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
+  const value = await responseJson(await fetch(`/api/books/${bookId}/bookmarks`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(draft),
+  }));
+  if (!value || typeof value !== "object" || !("outcome" in value) || !("state" in value)) throw new Error("书签服务返回了无效状态。");
+  const response = value as Record<string, unknown>;
+  const state = parseBookmarkState(response.state);
+  if ((response.outcome !== "created" && response.outcome !== "duplicate") || !state) throw new Error("书签服务返回了无效状态。");
+  return { outcome: response.outcome, state };
+}
+
+export async function deleteBookBookmark(bookId: string, bookmarkId: string): Promise<BookmarkState> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) throw new Error("本地书籍编号无效。");
+  const value = await responseJson(await fetch(`/api/books/${bookId}/bookmarks/${encodeURIComponent(bookmarkId)}`, { method: "DELETE" }));
+  const state = parseBookmarkState(value);
+  if (!state) throw new Error("书签服务返回了无效状态。");
+  return state;
+}
+
 export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBook> {
   const files = [...input];
   if (files.length === 0) throw new Error("没有选择任何文件。");
@@ -283,6 +318,7 @@ export async function loadBookFromFiles(input: Iterable<File>): Promise<LoadedBo
     documents,
     report,
     EMPTY_READING_STATE,
+    EMPTY_BOOKMARK_STATE,
     sourceLabel,
     (assetId) => assetUrlById.get(assetId) as string,
     () => {

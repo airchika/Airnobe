@@ -1,0 +1,13 @@
+{
+  "version": 4,
+  "id": "calibre-night",
+  "name": "Calibre 夜间",
+  "variant": "dark",
+  "colors": {
+    "background": "#121212",
+    "surface": "#202020",
+    "sidebar": "#2d2d2d",
+    "text": "#dddddd",
+    "accent": "#0b45c4"
+  }
+}

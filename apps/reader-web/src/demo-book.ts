@@ -1,6 +1,7 @@
 import type { BookDocument, BookManifest, ConversionReport } from "@airnobe/book-format";
 import type { LoadedBook } from "./book-source.js";
 import { EMPTY_READING_STATE } from "./reading-state.js";
+import { EMPTY_BOOKMARK_STATE } from "./bookmarks.js";
 
 const document: BookDocument = {
   id: "document-demo",
@@ -174,6 +175,7 @@ export function createDemoBook(): LoadedBook {
     assetUrlById: new Map(),
     report,
     readingState: structuredClone(EMPTY_READING_STATE),
+    bookmarkState: structuredClone(EMPTY_BOOKMARK_STATE),
     sourceLabel: "内置演示",
     dispose() {},
   };

@@ -1,0 +1,13 @@
+{
+  "version": 4,
+  "id": "calibre-day",
+  "name": "Calibre 日间",
+  "variant": "light",
+  "colors": {
+    "background": "#f0f0f0",
+    "surface": "#ffffff",
+    "sidebar": "#f0f0f0",
+    "text": "#000000",
+    "accent": "#308cc6"
+  }
+}

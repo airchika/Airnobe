@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadBookFromFiles, saveReadingPosition } from "./book-source.js";
+import { addBookBookmark, deleteBookBookmark, loadBookFromFiles, saveReadingPosition } from "./book-source.js";
 import { createDemoBook } from "./demo-book.js";
 
 function directoryFile(relativePath: string, contents: string, type = "application/json"): File {
@@ -22,8 +22,23 @@ describe("loadBookFromFiles", () => {
     expect(loaded.documents).toHaveLength(1);
     expect(loaded.sourceLabel).toBe("selected-book");
     expect(loaded.readingState.position).toBeNull();
+    expect(loaded.bookmarkState.bookmarks).toEqual([]);
     loaded.dispose();
     expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it("creates and deletes bookmarks through the library API", async () => {
+    const bookId = "01234567-89ab-4cde-8fab-0123456789ab";
+    const bookmarkId = "11234567-89ab-4cde-8fab-0123456789ab";
+    const draft = { position: { documentId: "document-1", blockId: "block-2", viewportOffset: -12, progress: 0.5, chapterLabel: null }, excerpt: "摘要" };
+    const state = { version: 1, bookmarks: [{ id: bookmarkId, ...draft, createdAt: "2026-08-09T00:00:00.000Z" }] } as const;
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ outcome: "created", state })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: 1, bookmarks: [] })));
+    await expect(addBookBookmark(bookId, draft)).resolves.toEqual({ outcome: "created", state });
+    await expect(deleteBookBookmark(bookId, bookmarkId)).resolves.toEqual({ version: 1, bookmarks: [] });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `/api/books/${bookId}/bookmarks`, expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `/api/books/${bookId}/bookmarks/${bookmarkId}`, { method: "DELETE" });
   });
 
   it("saves a validated reading position for a library book", async () => {

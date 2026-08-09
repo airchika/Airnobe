@@ -1,12 +1,13 @@
 {
-  "version": 2,
+  "version": 4,
   "id": "xcode-dark",
   "name": "Xcode Dark",
   "variant": "dark",
   "colors": {
-    "background": "#1f1f24", "surface": "#24242a", "surfaceRaised": "#2d2d34f2", "sidebar": "#19191e",
-    "text": "#f5f5f7", "mutedText": "#aaaab3", "border": "#42424a", "accent": "#4da3ff",
-    "accentText": "#061426", "accentSoft": "#4da3ff2b", "link": "#70b7ff", "readingText": "#f5f5f7",
-    "japaneseRule": "#4da3ff", "rubySource": "#d8b46f", "danger": "#ff8170"
+    "background": "#1f1f24",
+    "surface": "#24242a",
+    "sidebar": "#19191e",
+    "text": "#f5f5f7",
+    "accent": "#4da3ff"
   }
 }

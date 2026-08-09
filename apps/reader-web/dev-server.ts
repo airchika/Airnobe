@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { AIRNOBE_FORMAT_VERSION, BookManifestSchema, type BookManifest } from "@airnobe/book-format";
 import { inspectEpubBytes } from "@airnobe/epub-normalizer";
 import { createServer, type Plugin } from "vite";
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { importLibraryBook } from "./library-import.js";
 import { readReadingState, writeReadingState } from "./reading-state-store.js";
+import { addBookmark, deleteBookmark, readBookmarkState } from "./bookmark-store.js";
 import {
   findExactDuplicate,
   findProbableDuplicates,
@@ -18,21 +20,36 @@ import {
   type CollectionStatus,
 } from "./library-store.js";
 import { readReaderSettings, writeReaderSettings } from "./settings-store.js";
+import { readAppState, writeAppState } from "./app-state-store.js";
 import { readCustomThemes, writeCustomTheme } from "./theme-store.js";
 import { parseReadingPosition, readingProgressSummary, type ReadingPosition } from "./src/reading-state.js";
+import { parseBookmarkDraft } from "./src/bookmarks.js";
 import { parseReaderSettings } from "./src/reader-settings.js";
+import { parseAppState } from "./src/app-state.js";
 import { BUILTIN_THEMES, parseThemeDefinition } from "./src/themes.js";
+import { downloadNoveliaEpub, NoveliaDownloadError } from "./novelia-download.js";
 
 const APP_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_DIRECTORY = resolve(APP_DIRECTORY, "../..");
-const LIBRARY_DIRECTORY = resolve(REPOSITORY_DIRECTORY, "AirnobeLibrary");
+const LIBRARY_DIRECTORY = process.env.AIRNOBE_LIBRARY_DIRECTORY?.trim()
+  ? resolve(process.env.AIRNOBE_LIBRARY_DIRECTORY)
+  : resolve(REPOSITORY_DIRECTORY, "AirnobeLibrary");
 const LIBRARY_INDEX_PATH = join(LIBRARY_DIRECTORY, "library.json");
 const SETTINGS_PATH = join(LIBRARY_DIRECTORY, "user.json");
+const APP_STATE_PATH = join(LIBRARY_DIRECTORY, "app-state.json");
 const THEMES_DIRECTORY = join(LIBRARY_DIRECTORY, "themes");
 const MAX_EPUB_BYTES = 512 * 1024 * 1024;
 const MAX_THEME_BYTES = 64 * 1024;
+const MAX_BOOKMARK_BYTES = 16 * 1024;
+const MAX_APP_STATE_BYTES = 4 * 1024;
+const MAX_NOVELIA_REQUEST_BYTES = 4 * 1024;
 const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let mutationQueue: Promise<void> = Promise.resolve();
+const upstreamDispatcher = new EnvHttpProxyAgent();
+const fetchUpstream: typeof fetch = (input, init) => undiciFetch(
+  input as unknown as Parameters<typeof undiciFetch>[0],
+  { ...init, dispatcher: upstreamDispatcher } as Parameters<typeof undiciFetch>[1],
+) as unknown as Promise<Response>;
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -48,7 +65,12 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(JSON.stringify(value));
 }
 
-async function readRequestBytes(request: IncomingMessage, maximumBytes = MAX_EPUB_BYTES, sizeError = "EPUB 超过 512 MB。当前版本暂不支持。"): Promise<Uint8Array> {
+async function readRequestBytes(
+  request: IncomingMessage,
+  maximumBytes = MAX_EPUB_BYTES,
+  sizeError = "EPUB 超过 512 MB。当前版本暂不支持。",
+  emptyError = "没有收到 EPUB 文件。",
+): Promise<Uint8Array> {
   const declaredSize = Number(request.headers["content-length"] ?? 0);
   if (declaredSize > maximumBytes) throw new HttpError(413, sizeError);
   const chunks: Buffer[] = [];
@@ -59,12 +81,12 @@ async function readRequestBytes(request: IncomingMessage, maximumBytes = MAX_EPU
     if (size > maximumBytes) throw new HttpError(413, sizeError);
     chunks.push(bytes);
   }
-  if (size === 0) throw new HttpError(400, "没有收到 EPUB 文件。");
+  if (size === 0) throw new HttpError(400, emptyError);
   return Buffer.concat(chunks);
 }
 
-async function readRequestJson(request: IncomingMessage, maximumBytes = MAX_EPUB_BYTES, sizeError?: string): Promise<unknown> {
-  const bytes = await readRequestBytes(request, maximumBytes, sizeError);
+async function readRequestJson(request: IncomingMessage, maximumBytes = MAX_EPUB_BYTES, sizeError?: string, emptyError = "没有收到 JSON 请求正文。"): Promise<unknown> {
+  const bytes = await readRequestBytes(request, maximumBytes, sizeError, emptyError);
   try {
     return JSON.parse(Buffer.from(bytes).toString("utf8"));
   } catch {
@@ -90,6 +112,10 @@ function libraryBookDirectory(bookId: string): string {
 
 function readingStatePath(bookId: string): string {
   return resolve(libraryBookDirectory(bookId), "reading-state.json");
+}
+
+function bookmarkStatePath(bookId: string): string {
+  return resolve(libraryBookDirectory(bookId), "bookmarks.json");
 }
 
 function resolveBookFile(directory: string, relativePath: string): string {
@@ -181,6 +207,25 @@ async function importEpub(request: IncomingMessage, response: ServerResponse): P
   });
 }
 
+async function sendNoveliaEpub(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const value = await readRequestJson(
+    request,
+    MAX_NOVELIA_REQUEST_BYTES,
+    "轻小说机翻机器人导入请求超过 4 KB。",
+  );
+  if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length !== 1 || typeof (value as { url?: unknown }).url !== "string") {
+    throw new HttpError(400, "轻小说机翻机器人导入请求格式无效。");
+  }
+  const result = await downloadNoveliaEpub((value as { url: string }).url, { fetch: fetchUpstream });
+  response.writeHead(200, {
+    "content-type": "application/epub+zip",
+    "content-length": result.bytes.byteLength,
+    "cache-control": "no-store",
+    "x-airnobe-filename": encodeURIComponent(result.fileName),
+  });
+  response.end(Buffer.from(result.bytes));
+}
+
 function enqueueMutation(task: () => Promise<void>): Promise<void> {
   const pending = mutationQueue.then(task, task);
   mutationQueue = pending.catch(() => {});
@@ -269,7 +314,8 @@ async function sendBookBundle(bookId: string, response: ServerResponse): Promise
     report = undefined;
   }
   const readingState = await readReadingState(readingStatePath(bookId));
-  sendJson(response, 200, { book, documents, report, readingState });
+  const bookmarkState = await readBookmarkState(bookmarkStatePath(bookId));
+  sendJson(response, 200, { book, documents, report, readingState, bookmarkState });
 }
 
 function parseReadingPositionRequest(value: unknown): ReadingPosition | null {
@@ -289,6 +335,18 @@ async function updateReadingState(bookId: string, request: IncomingMessage, resp
   await readBook(directory);
   const position = parseReadingPositionRequest(await readRequestJson(request));
   sendJson(response, 200, await writeReadingState(readingStatePath(bookId), position));
+}
+
+async function createBookmark(bookId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  await readBook(libraryBookDirectory(bookId));
+  const draft = parseBookmarkDraft(await readRequestJson(request, MAX_BOOKMARK_BYTES, "书签请求过大。"));
+  if (!draft) throw new HttpError(400, "书签内容无效。");
+  sendJson(response, 200, await addBookmark(bookmarkStatePath(bookId), draft));
+}
+
+async function removeBookmark(bookId: string, bookmarkId: string, response: ServerResponse): Promise<void> {
+  await readBook(libraryBookDirectory(bookId));
+  sendJson(response, 200, await deleteBookmark(bookmarkStatePath(bookId), bookmarkId));
 }
 
 async function sendAsset(bookId: string, assetId: string, response: ServerResponse): Promise<void> {
@@ -333,6 +391,21 @@ async function updateReaderSettings(request: IncomingMessage, response: ServerRe
   sendJson(response, 200, settings);
 }
 
+async function sendAppState(response: ServerResponse): Promise<void> {
+  sendJson(response, 200, await readAppState(APP_STATE_PATH));
+}
+
+async function updateAppState(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const state = parseAppState(await readRequestJson(request, MAX_APP_STATE_BYTES, "应用状态 JSON 超过 4 KB。"));
+  if (!state) throw new HttpError(400, "应用状态格式无效。");
+  if (state.lastReadingBookId) {
+    const index = await readLibraryIndex(LIBRARY_INDEX_PATH);
+    if (!index.books.some((book) => book.id === state.lastReadingBookId)) throw new HttpError(404, "最后阅读的书籍不存在。");
+  }
+  await writeAppState(APP_STATE_PATH, state);
+  sendJson(response, 200, state);
+}
+
 async function sendThemes(response: ServerResponse): Promise<void> {
   sendJson(response, 200, {
     version: 1,
@@ -365,6 +438,10 @@ function localBookApi(): Plugin {
             await enqueueMutation(() => importEpub(request, response));
             return;
           }
+          if (request.method === "POST" && url.pathname === "/api/novelia/epub") {
+            await sendNoveliaEpub(request, response);
+            return;
+          }
           if (request.method === "GET" && url.pathname === "/api/library") {
             await sendLibrary(response);
             return;
@@ -391,6 +468,14 @@ function localBookApi(): Plugin {
             await enqueueMutation(() => updateReaderSettings(request, response));
             return;
           }
+          if (request.method === "GET" && url.pathname === "/api/app-state") {
+            await sendAppState(response);
+            return;
+          }
+          if (request.method === "PUT" && url.pathname === "/api/app-state") {
+            await enqueueMutation(() => updateAppState(request, response));
+            return;
+          }
           if (request.method === "GET" && url.pathname === "/api/themes") {
             await sendThemes(response);
             return;
@@ -410,6 +495,16 @@ function localBookApi(): Plugin {
             await enqueueMutation(() => updateReadingState(readingStateMatch[1] as string, request, response));
             return;
           }
+          const bookmarksMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/bookmarks$/i.exec(url.pathname);
+          if (request.method === "POST" && bookmarksMatch) {
+            await enqueueMutation(() => createBookmark(bookmarksMatch[1] as string, request, response));
+            return;
+          }
+          const bookmarkMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/bookmarks\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(url.pathname);
+          if (request.method === "DELETE" && bookmarkMatch) {
+            await enqueueMutation(() => removeBookmark(bookmarkMatch[1] as string, bookmarkMatch[2] as string, response));
+            return;
+          }
           const assetMatch = /^\/api\/books\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/assets\/([^/]+)$/i.exec(url.pathname);
           if (request.method === "GET" && assetMatch) {
             await sendAsset(assetMatch[1] as string, decodeURIComponent(assetMatch[2] as string), response);
@@ -422,7 +517,7 @@ function localBookApi(): Plugin {
           }
           next();
         } catch (error) {
-          const status = error instanceof HttpError ? error.status : 500;
+          const status = error instanceof HttpError || error instanceof NoveliaDownloadError ? error.status : 500;
           sendJson(response, status, { error: (error as Error).message });
         }
       });

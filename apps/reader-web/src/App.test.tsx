@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
 import type { LibraryBook } from "./library-client.js";
 import { DEFAULT_READER_SETTINGS } from "./reader-settings.js";
+import { createDemoBook } from "./demo-book.js";
 
 describe("App", () => {
   const bookId = "01234567-89ab-4cde-8fab-0123456789ab";
@@ -50,6 +51,69 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "打开转换结果" })).not.toBeInTheDocument();
   });
 
+  it("restores the most recently read book from the library with the shared shortcut", async () => {
+    const readBook = { ...libraryBook, readingProgress: { progress: 0.4, chapterLabel: "第二章", updatedAt: "2026-08-08T12:00:00.000Z" } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/library") return json({ version: 1, books: [readBook] });
+      if (url === `/api/books/${bookId}`) return json({ error: "test stop" }, 500);
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "返回阅读" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "e", code: "KeyE" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/api/books/${bookId}`));
+  });
+
+  it("opens a valid book even when saving the last-reading app state fails", async () => {
+    const user = userEvent.setup();
+    const demo = createDemoBook();
+    const readBook = { ...libraryBook, readingProgress: { progress: 0.4, chapterLabel: "第二章", updatedAt: "2026-08-08T12:00:00.000Z" } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/app-state" && init?.method === "PUT") return json({ error: "disk full" }, 500);
+      if (url === "/api/app-state") return json({ version: 1, lastReadingBookId: bookId });
+      if (url === "/api/library") return json({ version: 1, books: [readBook] });
+      if (url === `/api/books/${bookId}`) return json({ book: demo.book, documents: demo.documents, readingState: demo.readingState, bookmarkState: demo.bookmarkState });
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "返回阅读" }));
+    expect(await screen.findByText("状态未保存")).toBeInTheDocument();
+    expect(document.querySelector(".reader-app")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/reading-state") && init?.method === "PUT")).toBe(false);
+    demo.dispose();
+  });
+
+  it("keeps the library operable after the remembered book fails to open", async () => {
+    const user = userEvent.setup();
+    const demo = createDemoBook();
+    const otherBookId = "11234567-89ab-4cde-8fab-0123456789ab";
+    const remembered = { ...libraryBook, readingProgress: { progress: 0.4, chapterLabel: null, updatedAt: "2026-08-08T12:00:00.000Z" } };
+    const other = { ...libraryBook, id: otherBookId, title: "另一本文", sourceSha256: "b".repeat(64), readingProgress: null };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/app-state" && init?.method === "PUT") return json({ version: 1, lastReadingBookId: otherBookId });
+      if (url === "/api/app-state") return json({ version: 1, lastReadingBookId: bookId });
+      if (url === "/api/library") return json({ version: 1, books: [remembered, other] });
+      if (url === `/api/books/${bookId}`) return json({ error: "damaged book" }, 500);
+      if (url === `/api/books/${otherBookId}`) return json({ book: demo.book, documents: demo.documents, readingState: demo.readingState, bookmarkState: demo.bookmarkState });
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "返回阅读" }));
+    expect(await screen.findByText("damaged book")).toBeInTheDocument();
+    const otherTitle = screen.getByRole("button", { name: "另一本文" });
+    otherTitle.focus();
+    await user.keyboard(" ");
+    await user.click(screen.getByRole("button", { name: "继续阅读" }));
+    await waitFor(() => expect(document.querySelector(".reader-app")).toBeInTheDocument());
+    demo.dispose();
+  });
+
   it("imports an EPUB, stays in the library, and selects the new book", async () => {
     const user = userEvent.setup();
     let libraryReads = 0;
@@ -74,6 +138,37 @@ describe("App", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "示例书籍" }));
     expect(screen.getByRole("link", { name: "导出 EPUB" })).toHaveAttribute("href", `/api/books/${bookId}/source`);
     expect(screen.getByRole("link", { name: "导出 EPUB" })).toHaveAttribute("download", "sample.epub");
+  });
+
+  it("downloads a Novelia EPUB and hands it to the existing import queue", async () => {
+    const user = userEvent.setup();
+    let libraryReads = 0;
+    let importedName = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/library") {
+        libraryReads += 1;
+        return json({ version: 1, books: libraryReads === 1 ? [] : [libraryBook] });
+      }
+      if (url === "/api/novelia/epub") return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "content-type": "application/epub+zip", "x-airnobe-filename": encodeURIComponent("zh-jp.Ysg.再见巫师.epub") },
+      });
+      if (url === "/api/import-epub") {
+        importedName = decodeURIComponent(String((init?.headers as Record<string, string>)["x-airnobe-filename"]));
+        return json({ outcome: "imported", bookId });
+      }
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    await screen.findByText("书库为空");
+    await user.click(screen.getByRole("button", { name: "从轻小说机翻机器人导入" }));
+    expect(await screen.findByRole("dialog", { name: "从轻小说机翻机器人导入" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "导入" }));
+    expect(await screen.findByRole("heading", { name: "示例书籍" })).toBeInTheDocument();
+    expect(importedName).toBe("zh-jp.Ysg.再见巫师.epub");
+    expect(screen.queryByRole("dialog", { name: "从轻小说机翻机器人导入" })).not.toBeInTheDocument();
   });
 
   it("imports multiple selected or dropped EPUB files through one sequential queue", async () => {

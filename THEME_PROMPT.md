@@ -9,30 +9,28 @@
 
 ```json
 {
-  "version": 2,
+  "version": 4,
   "id": "safe-lowercase-slug",
   "name": "主题名称",
   "variant": "dark",
   "colors": {
     "background": "#RRGGBB",
     "surface": "#RRGGBB",
-    "surfaceRaised": "#RRGGBBAA",
     "sidebar": "#RRGGBB",
     "text": "#RRGGBB",
-    "mutedText": "#RRGGBB",
-    "border": "#RRGGBBAA",
-    "accent": "#RRGGBB",
-    "accentText": "#RRGGBB",
-    "accentSoft": "#RRGGBBAA",
-    "link": "#RRGGBB",
-    "readingText": "#RRGGBB",
-    "japaneseRule": "#RRGGBBAA",
-    "rubySource": "#RRGGBB",
-    "danger": "#RRGGBB"
+    "accent": "#RRGGBB"
   }
 }
 ```
 
+颜色含义：
+
+- `background`：阅读正文背景及主要内容区背景。
+- `surface`：书库筛选栏、面板、菜单和普通控件表面。
+- `sidebar`：只用于阅读器左右侧栏，不控制书库左栏。
+- `text`：界面与阅读正文的主要文字。
+- `accent`：强调操作、链接和日文引用线。
+
 `id` 只能使用小写英文字母、数字和连字符，长度 1–64；`variant` 只能是 `dark` 或 `light`。所有颜色必须是六位或八位十六进制颜色。
 
-请保证正文、菜单和按钮文字有清晰对比；弱化文字仍需可读；强调色上的 `accentText` 必须清楚；出版社原生 ruby 的 `rubySource` 能在阅读背景上阅读；错误色不能只依赖微弱明度差。不要增加格式中没有列出的键。
+请保证 `text` 在 `background`、`surface` 和 `sidebar` 上均清晰可读，`accent` 在主题背景上容易辨认。弱化文字、边框、选中背景、强调色文字和危险色由应用统一生成；注音颜色也由应用固定处理。不要增加格式中没有列出的键。

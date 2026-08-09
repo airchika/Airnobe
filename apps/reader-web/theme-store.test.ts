@@ -31,14 +31,28 @@ describe("theme store", () => {
     await expect(writeCustomTheme(directory, builtin)).rejects.toThrow(/内置主题/);
   });
 
-  it("reads legacy v1 files as normalized v2 themes", async () => {
+  it("reads legacy files as v4 without rewriting them until the next save", async () => {
     const directory = await mkdtemp(join(tmpdir(), "airnobe-themes-"));
     temporaryDirectories.push(directory);
     const current = structuredClone(BUILTIN_THEMES[0]!);
-    const legacy = { ...current, version: 1, id: "legacy-night", colors: { ...current.colors, rubyReused: "#112233", rubyGenerated: "#223344", rubyRomaji: "#334455" } };
+    const legacy = {
+      ...current,
+      version: 1,
+      id: "legacy-night",
+      colors: {
+        ...current.colors,
+        surfaceRaised: "#25292c", mutedText: "#878c8e", border: "#dfe5e724", accentText: "#000000",
+        accentSoft: "#d7a85c2e", link: "#d7a85c", readingText: "#dfe5e7", japaneseRule: "#d7a85c", danger: "#ff6b6b",
+        rubySource: "#bda579", rubyReused: "#112233", rubyGenerated: "#223344", rubyRomaji: "#334455",
+      },
+    };
     await writeFile(join(directory, "legacy-night.json"), JSON.stringify(legacy), "utf8");
     const [theme] = await readCustomThemes(directory);
-    expect(theme?.version).toBe(2);
+    expect(theme?.version).toBe(4);
     expect(theme?.colors).not.toHaveProperty("rubyGenerated");
+    expect(JSON.parse(await readFile(join(directory, "legacy-night.json"), "utf8")).version).toBe(1);
+    if (!theme) throw new Error("Legacy theme was not normalized.");
+    await writeCustomTheme(directory, theme);
+    expect(JSON.parse(await readFile(join(directory, "legacy-night.json"), "utf8")).version).toBe(4);
   });
 });

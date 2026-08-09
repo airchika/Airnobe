@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { coverUrl, sourceEpubUrl, type CollectionStatus, type LibraryBook } from "./library-client.js";
-import { useSpatialNavigation } from "./spatial-navigation.js";
+import type { ShortcutBinding } from "./reader-settings.js";
+import { matchesShortcut } from "./shortcut-bindings.js";
+import { findSpatialTarget, useSpatialNavigation, type SpatialDirection } from "./spatial-navigation.js";
+import noveliaIcon from "./assets/novelia-icon.svg";
 
 interface LibraryViewProps {
   books: LibraryBook[];
   selectedBookId?: string;
   onSelect(bookId: string): void;
   onImport(): void;
+  onOpenNovelia?(): void;
   onOpenSettings?(): void;
+  onReturnToReading?(): void;
+  switchViewShortcut?: ShortcutBinding | null;
+  fullscreenShortcut?: ShortcutBinding | null;
+  onToggleFullscreen?(): void;
   onRead(bookId: string, mode?: "continue" | "beginning"): void;
   onUpdate(bookId: string, patch: { collectionStatus?: CollectionStatus; note?: string }): Promise<void>;
   onDelete?(bookId: string): void;
@@ -21,6 +29,31 @@ type SortKey = "title" | "status" | "recent";
 interface PopupPosition { bookId: string; left: number; top: number }
 
 const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+
+function nearestHorizontal(items: HTMLElement[], current: HTMLElement): HTMLElement | undefined {
+  const currentRect = current.getBoundingClientRect();
+  const currentCenter = currentRect.left + currentRect.width / 2;
+  return items.reduce<HTMLElement | undefined>((nearest, candidate) => {
+    if (!nearest) return candidate;
+    const candidateRect = candidate.getBoundingClientRect();
+    const nearestRect = nearest.getBoundingClientRect();
+    const candidateDistance = Math.abs(candidateRect.left + candidateRect.width / 2 - currentCenter);
+    const nearestDistance = Math.abs(nearestRect.left + nearestRect.width / 2 - currentCenter);
+    return candidateDistance < nearestDistance ? candidate : nearest;
+  }, undefined);
+}
+
+function resolveLibrarySpatialTarget(items: HTMLElement[], current: HTMLElement, direction: SpatialDirection): HTMLElement | undefined {
+  const isHeaderAction = current.hasAttribute("data-library-header-action");
+  const isBodyTop = current.dataset.spatialRow === "0" && ["filters", "books"].includes(current.dataset.spatialZone ?? "");
+  if (direction === "up" && isBodyTop) {
+    return nearestHorizontal(items.filter((item) => item.hasAttribute("data-library-header-action")), current) ?? current;
+  }
+  if (direction === "down" && isHeaderAction) {
+    return nearestHorizontal(items.filter((item) => item.dataset.spatialRow === "0" && ["filters", "books"].includes(item.dataset.spatialZone ?? "")), current) ?? current;
+  }
+  return findSpatialTarget(items, current, direction);
+}
 
 function contentKindLabel(book: LibraryBook): string {
   return { chinese: "纯中文", japanese: "纯日文", parallel: "中日对照", mixed: "混合内容", unknown: "未分类" }[book.contentKind];
@@ -58,7 +91,29 @@ export function metadataLanguageClass(book: LibraryBook, text: string): string |
   return book.contentKind === "japanese" || book.contentKind === "parallel" || KANA.test(text) ? "font-japanese" : undefined;
 }
 
-export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenSettings, onRead, onUpdate, onDelete = () => {}, keyboardNavigationEnabled = true }: LibraryViewProps) {
+interface LibraryDetailLayerProps {
+  book: LibraryBook;
+  phase: "entering" | "active" | "exiting";
+  onAnimationComplete(bookId: string, phase: "entering" | "active" | "exiting"): void;
+}
+
+function LibraryDetailLayer({ book, phase, onAnimationComplete }: LibraryDetailLayerProps) {
+  const [coverLoaded, setCoverLoaded] = useState(false);
+  const cover = coverUrl(book);
+  return <div
+    className="library-detail-layer"
+    data-phase={phase}
+    onAnimationEnd={(event) => {
+      if (event.target === event.currentTarget) onAnimationComplete(book.id, phase);
+    }}
+  >
+    {cover && <img className="library-cover" data-loaded={coverLoaded} src={cover} alt={`${book.title}封面`} onLoad={() => setCoverLoaded(true)} onError={() => setCoverLoaded(true)} />}
+    <div className="library-detail-heading"><h2 className={metadataLanguageClass(book, book.title)}>{book.title || "未命名书籍"}</h2><p className={metadataLanguageClass(book, book.authors.join(" / "))}>{book.authors.join(" / ") || "作者不详"}</p></div>
+    <dl className="library-metadata"><div><dt>书籍</dt><dd>{contentKindLabel(book)} · {annotationLabel(book)} · {formatSize(book.sourceSize)}</dd></div><div><dt>阅读</dt><dd>{book.readingProgress ? `${Math.round(book.readingProgress.progress * 100)}%${book.readingProgress.chapterLabel ? ` · ${book.readingProgress.chapterLabel}` : ""}` : "尚未开始"}</dd></div></dl>
+  </div>;
+}
+
+export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenNovelia, onOpenSettings, onReturnToReading, switchViewShortcut, fullscreenShortcut, onToggleFullscreen, onRead, onUpdate, onDelete = () => {}, keyboardNavigationEnabled = true }: LibraryViewProps) {
   const rootRef = useRef<HTMLElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const popupReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -83,6 +138,44 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenS
   }), [books, sort]);
   const visibleBooks = useMemo(() => filter === "all" ? sortedBooks : sortedBooks.filter((book) => book.collectionStatus === filter), [filter, sortedBooks]);
   const selected = books.find((book) => book.id === selectedBookId);
+  const [detailLayers, setDetailLayers] = useState<Array<{ book: LibraryBook; phase: "entering" | "active" | "exiting" }>>([]);
+  const detailTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (detailTimerRef.current !== undefined) window.clearTimeout(detailTimerRef.current);
+    const nextSelected = selected && visibleBooks.some((book) => book.id === selected.id) ? selected : undefined;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setDetailLayers(nextSelected ? [{ book: nextSelected, phase: "active" }] : []);
+      return;
+    }
+    setDetailLayers((current) => {
+      const next = current.map((layer) => layer.book.id === nextSelected?.id
+        ? { book: nextSelected, phase: layer.phase === "active" ? "active" as const : "entering" as const }
+        : { ...layer, phase: "exiting" as const });
+      if (nextSelected && !next.some((layer) => layer.book.id === nextSelected.id)) {
+        next.push({ book: nextSelected, phase: "entering" });
+      }
+      return next;
+    });
+    detailTimerRef.current = window.setTimeout(() => {
+      setDetailLayers((current) => current
+        .filter((layer) => layer.phase !== "exiting")
+        .map((layer) => layer.phase === "entering" ? { ...layer, phase: "active" } : layer));
+    }, 540);
+    return () => {
+      if (detailTimerRef.current !== undefined) window.clearTimeout(detailTimerRef.current);
+    };
+  }, [selected?.id, visibleBooks]);
+
+  useEffect(() => {
+    if (!selected) return;
+    setDetailLayers((current) => current.map((layer) => layer.book.id === selected.id ? { ...layer, book: selected } : layer));
+  }, [selected]);
+  const finishDetailAnimation = useCallback((bookId: string, phase: "entering" | "active" | "exiting") => {
+    setDetailLayers((current) => phase === "exiting"
+      ? current.filter((layer) => layer.book.id !== bookId)
+      : current.map((layer) => layer.book.id === bookId && layer.phase === "entering" ? { ...layer, phase: "active" } : layer));
+  }, []);
   const popupBook = books.find((book) => book.id === actionPopup?.bookId);
 
   useEffect(() => {
@@ -119,13 +212,29 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenS
   }, [popupOpen]);
   const openStatusMenu = (): void => { setStatusMenuOpen(true); requestAnimationFrame(() => popupRef.current?.querySelector<HTMLElement>("[aria-selected]")?.focus({ preventScroll: true })); };
 
-  useSpatialNavigation({ rootRef, enabled: keyboardNavigationEnabled && !popupOpen, keys: "both", onActivate: (element) => {
+  useSpatialNavigation({ rootRef, enabled: keyboardNavigationEnabled && !popupOpen, keys: "both", resolveTarget: resolveLibrarySpatialTarget, onActivate: (element) => {
     if (element.dataset.spatialAction !== "book-actions") return false;
     const book = books.find((candidate) => candidate.id === element.dataset.libraryBookId);
     if (book) openActionPopup(book, element);
     return true;
   } });
   useSpatialNavigation({ rootRef: popupRef, enabled: keyboardNavigationEnabled && popupOpen, keys: "both", onCancel: () => { if (statusMenuOpen) { setStatusMenuOpen(false); requestAnimationFrame(() => popupRef.current?.querySelector<HTMLElement>("[data-popup-action='status']")?.focus({ preventScroll: true })); return true; } closePopup(); return true; } });
+  useEffect(() => {
+    if (!keyboardNavigationEnabled || popupOpen) return;
+    const listener = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (event.repeat || event.isComposing || target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) return;
+      if (fullscreenShortcut && onToggleFullscreen && matchesShortcut(event, fullscreenShortcut)) {
+        event.preventDefault();
+        onToggleFullscreen();
+      } else if (switchViewShortcut && onReturnToReading && matchesShortcut(event, switchViewShortcut)) {
+        event.preventDefault();
+        onReturnToReading();
+      }
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [fullscreenShortcut, keyboardNavigationEnabled, onReturnToReading, onToggleFullscreen, popupOpen, switchViewShortcut]);
 
   const chooseSort = (key: SortKey): void => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
   const sortLabel = (key: SortKey): string => sort.key === key ? (sort.direction === 1 ? " ↑" : " ↓") : "";
@@ -133,8 +242,10 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenS
 
   return <main className="library-app" ref={rootRef}>
     <header className="library-header"><h1>Airnobe</h1><div className="library-header-actions">
-      <button className="library-icon-action" type="button" title="导入 EPUB" aria-label="导入 EPUB" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onImport}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14" /></svg></button>
-      <button className="library-icon-action" type="button" title="设置" aria-label="设置" data-spatial-item data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onOpenSettings}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8 3.5-2.1-1.1.1-2.4-2.5-1.5-2 1.2L11.4 7 9 8.3 7 7 4.5 8.5l.1 2.4L2.5 12l2.1 1.1-.1 2.4L7 17l2-1.2 2.1 1.2 2.4-1.3 2 1.3 2.5-1.5-.1-2.4L20 12Z" /></svg></button>
+      {onReturnToReading && <button className="library-icon-action" type="button" title="返回阅读" aria-label="返回阅读" data-spatial-item data-library-header-action data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onReturnToReading}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="1.5" /><path d="M9 7h6M9 10h6" /></svg></button>}
+      <button className="library-icon-action" type="button" title="导入 EPUB" aria-label="导入 EPUB" data-spatial-item data-library-header-action data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onImport}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
+      <button className="library-icon-action" type="button" title="设置" aria-label="设置" data-spatial-item data-library-header-action data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onOpenSettings}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.55-1.03H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1.03-1.55V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.55 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></svg></button>
+      {onOpenNovelia && <button className="library-icon-action library-icon-action--novelia" type="button" title="从轻小说机翻机器人导入" aria-label="从轻小说机翻机器人导入" data-spatial-item data-library-header-action data-spatial-zone="detail" data-spatial-zone-order="2" data-spatial-row="0" onClick={onOpenNovelia}><img src={noveliaIcon} alt="" aria-hidden="true" /></button>}
     </div></header>
     <div className="library-grid">
       <nav className="library-filters" aria-label="藏书状态">
@@ -142,18 +253,14 @@ export function LibraryView({ books, selectedBookId, onSelect, onImport, onOpenS
         {STATUS_ORDER.map((status, index) => <button key={status} type="button" data-spatial-item data-spatial-zone="filters" data-spatial-zone-order="0" data-spatial-row={String(index + 1)} aria-pressed={filter === status} onFocus={() => activateFilter(status)} onClick={() => activateFilter(status)}><span>{STATUS_LABELS[status]}</span><b>{books.filter((book) => book.collectionStatus === status).length}</b></button>)}
       </nav>
       <section className="library-list" aria-label="书籍列表">
-        <div className="library-list-header">{([ ["title", "书名"], ["status", "状态"], ["recent", "最近打开"] ] as const).map(([key, label]) => <button key={key} type="button" onClick={() => chooseSort(key)} aria-pressed={sort.key === key}>{label}{sortLabel(key)}</button>)}</div>
+        <div className="library-list-header">{([ ["title", "书名"], ["status", "状态"], ["recent", "最近打开"] ] as const).map(([key, label]) => <button key={key} type="button" onClick={() => chooseSort(key)} aria-pressed={sort.key === key}>{label}{key === "status" ? <i className="library-sort-slot" aria-hidden="true">{sort.key === key ? (sort.direction === 1 ? "↑" : "↓") : "↑"}</i> : sortLabel(key)}</button>)}</div>
         {visibleBooks.length === 0 ? <p className="library-empty">{books.length === 0 ? "书库为空" : "此分类暂无书籍"}</p> : visibleBooks.map((book, index) => <div className="library-row" data-selected={book.id === selectedBookId} key={book.id} onClick={() => onSelect(book.id)} onContextMenu={(event) => { event.preventDefault(); openActionPopup(book, event.currentTarget, { x: event.clientX, y: event.clientY }); }}>
           <button className={`library-row-title ${metadataLanguageClass(book, book.title) ?? ""}`} type="button" data-spatial-item data-spatial-zone="books" data-spatial-zone-order="1" data-spatial-row={String(index)} data-spatial-action="book-actions" data-library-book-id={book.id} onFocus={() => onSelect(book.id)} onDoubleClick={() => onRead(book.id)}>{book.title || "未命名书籍"}</button>
           <span className="library-row-status">{STATUS_LABELS[book.collectionStatus]}</span>
           <span className="library-row-recent">{formatRecentlyOpened(book)}</span>
         </div>)}
       </section>
-      <aside className="library-detail" aria-label="书籍详情">{selected && visibleBooks.some((book) => book.id === selected.id) && <>
-        {coverUrl(selected) && <img className="library-cover" src={coverUrl(selected)} alt={`${selected.title}封面`} />}
-        <div className="library-detail-heading"><h2 className={metadataLanguageClass(selected, selected.title)}>{selected.title || "未命名书籍"}</h2><p className={metadataLanguageClass(selected, selected.authors.join(" / "))}>{selected.authors.join(" / ") || "作者不详"}</p></div>
-        <dl className="library-metadata"><div><dt>书籍</dt><dd>{contentKindLabel(selected)} · {annotationLabel(selected)} · {formatSize(selected.sourceSize)}</dd></div><div><dt>阅读</dt><dd>{selected.readingProgress ? `${Math.round(selected.readingProgress.progress * 100)}%${selected.readingProgress.chapterLabel ? ` · ${selected.readingProgress.chapterLabel}` : ""}` : "尚未开始"}</dd></div></dl>
-      </>}</aside>
+      <aside className="library-detail" aria-label="书籍详情">{detailLayers.map(({ book, phase }) => <LibraryDetailLayer book={book} phase={phase} onAnimationComplete={finishDetailAnimation} key={book.id} />)}</aside>
     </div>
     {popupOpen && <div className="library-popup-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) closePopup(); }}><div className="library-popup" ref={popupRef} style={{ left: actionPopup?.left, top: actionPopup?.top }} role="menu" aria-label={statusMenuOpen ? "选择收藏状态" : "书籍操作"}>
       {popupBook && statusMenuOpen && STATUS_ORDER.map((status, index) => <button key={status} type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row={String(index)} aria-selected={popupBook.collectionStatus === status} onClick={() => void onUpdate(popupBook.id, { collectionStatus: status }).then(closePopup).catch(() => {})}>{STATUS_LABELS[status]}</button>)}

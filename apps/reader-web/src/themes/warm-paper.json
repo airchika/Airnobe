@@ -1,12 +1,13 @@
 {
-  "version": 2,
+  "version": 4,
   "id": "warm-paper",
   "name": "暖纸",
   "variant": "light",
   "colors": {
-    "background": "#f3efe5", "surface": "#ebe5d8", "surfaceRaised": "#fffaf0f2", "sidebar": "#e4ddcf",
-    "text": "#302c27", "mutedText": "#756d63", "border": "#8d81734d", "accent": "#9b6545",
-    "accentText": "#fffaf2", "accentSoft": "#9b654526", "link": "#805238", "readingText": "#302c27",
-    "japaneseRule": "#9b6545", "rubySource": "#82652d", "danger": "#a34b42"
+    "background": "#f3efe5",
+    "surface": "#ebe5d8",
+    "sidebar": "#e4ddcf",
+    "text": "#302c27",
+    "accent": "#9b6545"
   }
 }

@@ -1,0 +1,14 @@
+{
+  "name": "@airnobe/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1 build --no-bundle",
+    "typecheck": "tsc -p ../reader-web/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

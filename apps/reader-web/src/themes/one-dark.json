@@ -1,12 +1,13 @@
 {
-  "version": 2,
+  "version": 4,
   "id": "one-dark",
   "name": "One Dark",
   "variant": "dark",
   "colors": {
-    "background": "#21252b", "surface": "#282c34", "surfaceRaised": "#303640f2", "sidebar": "#1e2228",
-    "text": "#abb2bf", "mutedText": "#7f8998", "border": "#abb2bf24", "accent": "#4d78cc",
-    "accentText": "#f3f6fc", "accentSoft": "#4d78cc2b", "link": "#61afef", "readingText": "#c8cdd5",
-    "japaneseRule": "#4d78cc", "rubySource": "#d19a66", "danger": "#e06c75"
+    "background": "#21252b",
+    "surface": "#282c34",
+    "sidebar": "#1e2228",
+    "text": "#abb2bf",
+    "accent": "#4d78cc"
   }
 }

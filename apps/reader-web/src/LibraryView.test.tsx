@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatRecentlyOpened, LibraryView, metadataLanguageClass } from "./LibraryView.js";
@@ -9,7 +9,11 @@ const old: LibraryBook = { ...base, id: "01234567-89ab-4cde-8fab-0123456789ab", 
 const recent: LibraryBook = { ...base, id: "11234567-89ab-4cde-8fab-0123456789ab", sourceFileName: "新书.epub", title: "新书", authors: ["乙"], collectionStatus: "reading", readingProgress: { progress: .43, chapterLabel: "第三章", updatedAt: "2026-08-06T00:00:00Z" } };
 const renderView = (overrides = {}) => render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} {...overrides} />);
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("LibraryView", () => {
   it("sorts opened books first and exposes sortable three-column headers", () => {
@@ -18,6 +22,51 @@ describe("LibraryView", () => {
     expect(within(list).getAllByRole("button", { name: /新书|旧书/ })[0]).toHaveTextContent("新书");
     for (const name of ["书名", "状态", /最近打开/]) expect(within(list).getByRole("button", { name })).toBeInTheDocument();
     expect(within(list).queryByRole("button", { name: "作者" })).not.toBeInTheDocument();
+  });
+
+  it("shows a book icon action that returns to the last reading session", async () => {
+    const user = userEvent.setup();
+    const onReturnToReading = vi.fn();
+    renderView({ onReturnToReading });
+    const button = screen.getByRole("button", { name: "返回阅读" });
+    expect(button.querySelector("svg")).toBeInTheDocument();
+    await user.click(button);
+    expect(onReturnToReading).toHaveBeenCalledOnce();
+  });
+
+  it("places the Novelia robot import action last", async () => {
+    const user = userEvent.setup();
+    const onOpenNovelia = vi.fn();
+    renderView({ onOpenNovelia });
+    const actions = screen.getByRole("heading", { name: "Airnobe" }).parentElement?.querySelectorAll(".library-header-actions button");
+    expect([...actions!].map((button) => button.getAttribute("aria-label"))).toEqual(["导入 EPUB", "设置", "从轻小说机翻机器人导入"]);
+    expect(screen.getByRole("button", { name: "从轻小说机翻机器人导入" }).querySelector("img")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "从轻小说机翻机器人导入" }));
+    expect(onOpenNovelia).toHaveBeenCalledOnce();
+  });
+
+  it("uses the configured fullscreen shortcut in the library", () => {
+    const onToggleFullscreen = vi.fn();
+    renderView({ fullscreenShortcut: { code: "KeyG" }, onToggleFullscreen });
+    fireEvent.keyDown(window, { key: "g", code: "KeyG" });
+    expect(onToggleFullscreen).toHaveBeenCalledOnce();
+  });
+
+  it("moves up from the top filter or book to the header actions and back down", () => {
+    renderView();
+    const allFilter = screen.getByRole("button", { name: "全部2" });
+    const firstBook = screen.getByRole("button", { name: "新书" });
+    const importButton = screen.getByRole("button", { name: "导入 EPUB" });
+
+    allFilter.focus();
+    fireEvent.keyDown(window, { key: "w", code: "KeyW" });
+    expect(importButton).toHaveFocus();
+    fireEvent.keyDown(window, { key: "s", code: "KeyS" });
+    expect(allFilter).toHaveFocus();
+
+    firstBook.focus();
+    fireEvent.keyDown(window, { key: "ArrowUp", code: "ArrowUp" });
+    expect(importButton).toHaveFocus();
   });
 
   it("does not automatically select the first result when a filter takes focus", async () => {
@@ -38,6 +87,44 @@ describe("LibraryView", () => {
     expect(within(detail).queryByRole("button")).not.toBeInTheDocument();
     expect(metadataLanguageClass({ ...recent, contentKind: "parallel" }, "告白")).toBe("font-japanese");
     expect(metadataLanguageClass(recent, "カタカナ")).toBe("font-japanese");
+  });
+
+  it("animates details into and out of the fixed detail pane", () => {
+    const view = render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} />);
+    const entering = document.querySelector<HTMLElement>(`.library-detail-layer[data-phase="entering"]`);
+    expect(entering).toHaveTextContent("新书");
+    fireEvent.animationEnd(entering as HTMLElement);
+    expect(document.querySelector(`.library-detail-layer[data-phase="active"]`)).toHaveTextContent("新书");
+    view.rerender(<LibraryView books={[old, recent]} selectedBookId="" onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} />);
+    const exiting = document.querySelector<HTMLElement>(`.library-detail-layer[data-phase="exiting"]`);
+    expect(exiting).toHaveTextContent("新书");
+    fireEvent.animationEnd(exiting as HTMLElement);
+    expect(document.querySelector(".library-detail-layer")).not.toBeInTheDocument();
+  });
+
+  it("crossfades old and new details when the selected book changes", () => {
+    const view = render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} />);
+    fireEvent.animationEnd(document.querySelector(`.library-detail-layer[data-phase="entering"]`) as HTMLElement);
+    view.rerender(<LibraryView books={[old, recent]} selectedBookId={old.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} />);
+    expect(document.querySelector(`.library-detail-layer[data-phase="exiting"]`)).toHaveTextContent("新书");
+    expect(document.querySelector(`.library-detail-layer[data-phase="entering"]`)).toHaveTextContent("旧书");
+  });
+
+  it("keeps detail layers mounted through the 500ms animation fallback", () => {
+    vi.useFakeTimers();
+    renderView();
+    expect(document.querySelector(`.library-detail-layer[data-phase="entering"]`)).toHaveTextContent("新书");
+    act(() => vi.advanceTimersByTime(500));
+    expect(document.querySelector(`.library-detail-layer[data-phase="entering"]`)).toHaveTextContent("新书");
+    act(() => vi.advanceTimersByTime(40));
+    expect(document.querySelector(`.library-detail-layer[data-phase="active"]`)).toHaveTextContent("新书");
+  });
+
+  it("skips detail animation when reduced motion is requested", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    renderView();
+    expect(document.querySelector(`.library-detail-layer[data-phase="active"]`)).toHaveTextContent("新书");
+    expect(document.querySelector(`.library-detail-layer[data-phase="entering"]`)).not.toBeInTheDocument();
   });
 
   it("opens status picker from the action menu and updates the selected status", async () => {

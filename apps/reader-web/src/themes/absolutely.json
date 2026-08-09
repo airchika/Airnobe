@@ -1,12 +1,13 @@
 {
-  "version": 2,
+  "version": 4,
   "id": "absolutely",
   "name": "Absolutely",
   "variant": "dark",
   "colors": {
-    "background": "#252523", "surface": "#2d2d2b", "surfaceRaised": "#363633f2", "sidebar": "#20201f",
-    "text": "#f9f9f7", "mutedText": "#aaa9a5", "border": "#ffffff1f", "accent": "#cc7d5e",
-    "accentText": "#211713", "accentSoft": "#cc7d5e2b", "link": "#e29a7e", "readingText": "#f9f9f7",
-    "japaneseRule": "#cc7d5e", "rubySource": "#d9b38c", "danger": "#ff8b73"
+    "background": "#252523",
+    "surface": "#2d2d2b",
+    "sidebar": "#20201f",
+    "text": "#f9f9f7",
+    "accent": "#cc7d5e"
   }
 }

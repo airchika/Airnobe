@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "reac
 import { BookReader } from "./BookReader.js";
 import { LibraryView } from "./LibraryView.js";
 import {
+  addBookBookmark,
+  deleteBookBookmark,
   importEpubFile,
   loadBookFromApi,
   loadBookFromFiles,
@@ -29,6 +31,11 @@ import { useSpatialNavigation } from "./spatial-navigation.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { builtinThemeOptions, importTheme as importCustomTheme, loadThemes, type AvailableTheme } from "./theme-client.js";
 import { applyTheme, BUILTIN_THEMES, DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, type ThemeDefinition } from "./themes.js";
+import { chooseDesktopEpubFiles, listenForDesktopEpubDrop } from "./desktop-files.js";
+import { EMPTY_APP_STATE, loadAppState, saveAppState } from "./app-state.js";
+import { toggleFullscreenState } from "./fullscreen.js";
+import { NoveliaImportDialog } from "./NoveliaImportDialog.js";
+import { downloadNoveliaEpubFile } from "./novelia-client.js";
 
 type BatchDuplicateAction = "ignore" | "replace" | "add";
 interface BatchDuplicateDecision { action: BatchDuplicateAction | "cancel"; bookId?: string; applyToRemaining?: boolean }
@@ -38,14 +45,24 @@ interface ImportBatchSummary {
   warnings: Array<{ fileName: string; message: string }>;
 }
 
+function mostRecentlyReadBookId(books: LibraryBook[]): string | undefined {
+  return books.reduce<{ id: string; timestamp: number } | undefined>((latest, book) => {
+    const timestamp = book.readingProgress?.updatedAt ? Date.parse(book.readingProgress.updatedAt) : Number.NaN;
+    if (!Number.isFinite(timestamp) || (latest && latest.timestamp >= timestamp)) return latest;
+    return { id: book.id, timestamp };
+  }, undefined)?.id;
+}
+
 export function App() {
   const initialDemo = new URLSearchParams(window.location.search).get("demo") === "1";
   const [loaded, setLoaded] = useState<LoadedBook | undefined>(() => initialDemo ? createDemoBook() : undefined);
   const [libraryBooks, setLibraryBooks] = useState<LibraryBook[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<string>();
+  const [lastReadingBookId, setLastReadingBookId] = useState<string>();
   const [libraryLoading, setLibraryLoading] = useState(!initialDemo);
   const [loading, setLoading] = useState<string>();
   const [error, setError] = useState<string>();
+  const [openIssue, setOpenIssue] = useState<{ title: string; message: string }>();
   const [notice, setNotice] = useState<string>();
   const [duplicatePrompt, setDuplicatePrompt] = useState<{
     file: File;
@@ -58,6 +75,7 @@ export function App() {
   const [settings, setSettings] = useState<ReaderSettings>(() => cloneReaderSettings(DEFAULT_READER_SETTINGS));
   const [themes, setThemes] = useState<AvailableTheme[]>(builtinThemeOptions);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [noveliaImportOpen, setNoveliaImportOpen] = useState(false);
   const [systemDark, setSystemDark] = useState(() => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true);
   const [duplicateSelectEditing, setDuplicateSelectEditing] = useState(false);
   const epubInputRef = useRef<HTMLInputElement>(null);
@@ -112,20 +130,27 @@ export function App() {
     applyTheme(selected);
   }, [settings.appearance.theme, systemDark, themes]);
 
-  const refreshLibrary = useCallback(async (preferredBookId?: string): Promise<void> => {
+  const refreshLibrary = useCallback(async (preferredBookId?: string, rememberedBookId?: string | null): Promise<LibraryBook[]> => {
     const books = await loadLibrary();
     setLibraryBooks(books);
+    setLastReadingBookId((current) => {
+      if (rememberedBookId && books.some((book) => book.id === rememberedBookId)) return rememberedBookId;
+      return current && books.some((book) => book.id === current) ? current : mostRecentlyReadBookId(books);
+    });
     setSelectedBookId((current) => {
       if (preferredBookId && books.some((book) => book.id === preferredBookId)) return preferredBookId;
       if (current && books.some((book) => book.id === current)) return current;
       return [...books].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.id;
     });
+    return books;
   }, []);
 
   useEffect(() => {
     if (initialDemo) return;
     let active = true;
-    void refreshLibrary()
+    void loadAppState()
+      .catch(() => structuredClone(EMPTY_APP_STATE))
+      .then((state) => refreshLibrary(undefined, state.lastReadingBookId))
       .catch((libraryError) => {
         if (active) setError((libraryError as Error).message);
       })
@@ -135,7 +160,14 @@ export function App() {
     return () => { active = false; };
   }, [initialDemo, refreshLibrary]);
 
-  const openEpubPicker = (): void => epubInputRef.current?.click();
+  const openEpubPicker = (): void => {
+    void chooseDesktopEpubFiles()
+      .then((files) => {
+        if (files === undefined) epubInputRef.current?.click();
+        else if (files.length > 0) void startImportBatch(files);
+      })
+      .catch((pickerError) => setError((pickerError as Error).message));
+  };
 
   const saveSettings = async (next: ReaderSettings): Promise<void> => {
     const previous = settings;
@@ -184,12 +216,17 @@ export function App() {
   const readLibraryBook = async (bookId: string, mode: "continue" | "beginning" = "continue"): Promise<void> => {
     setLoading("正在打开…");
     setError(undefined);
+    setOpenIssue(undefined);
     try {
       const book = await loadBookFromApi(bookId);
       if (mode === "beginning") book.readingState = structuredClone(EMPTY_READING_STATE);
+      setLastReadingBookId(bookId);
       installBook(book);
+      void saveAppState(bookId).catch((stateError) => {
+        setOpenIssue({ title: "状态未保存", message: `书籍已打开，但无法保存最后阅读记录：${(stateError as Error).message}` });
+      });
     } catch (loadError) {
-      setError((loadError as Error).message);
+      setOpenIssue({ title: "无法打开", message: (loadError as Error).message });
     } finally {
       setLoading(undefined);
     }
@@ -292,6 +329,20 @@ export function App() {
     return () => { window.removeEventListener("dragenter", onDragEnter); window.removeEventListener("dragover", onDragOver); window.removeEventListener("dragleave", onDragLeave); window.removeEventListener("drop", onDrop); };
   }, [startImportBatch]);
 
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listenForDesktopEpubDrop({
+      onActive: setDragActive,
+      onFiles: (files, invalidCount) => { if (!disposed) void startImportBatch(files, invalidCount); },
+      onError: (message) => { if (!disposed) setError(message); },
+    }).then((next) => {
+      if (disposed) next?.();
+      else unlisten = next;
+    }).catch((dropError) => { if (!disposed) setError((dropError as Error).message); });
+    return () => { disposed = true; unlisten?.(); };
+  }, [startImportBatch]);
+
   const onDirectorySelected = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const files = event.currentTarget.files ? [...event.currentTarget.files] : [];
     event.currentTarget.value = "";
@@ -331,7 +382,14 @@ export function App() {
     setNotice(undefined);
     try {
       await deleteLibraryBook(prompt.bookId);
-      await refreshLibrary();
+      const books = await refreshLibrary();
+      if (lastReadingBookId === prompt.bookId) {
+        const fallbackBookId = mostRecentlyReadBookId(books);
+        setLastReadingBookId(fallbackBookId);
+        void saveAppState(fallbackBookId ?? null).catch((stateError) => {
+          setOpenIssue({ title: "状态未保存", message: `书籍已删除，但无法更新最后阅读记录：${(stateError as Error).message}` });
+        });
+      }
       setNotice(`已删除“${prompt.title || "未命名书籍"}”。`);
     } catch (deleteError) {
       setError((deleteError as Error).message);
@@ -341,7 +399,7 @@ export function App() {
   };
 
   const overlayMessage = loading ?? (libraryLoading && !loaded ? "正在加载书库…" : undefined);
-  const interactiveOverlay = settingsOpen ? "settings" : duplicatePrompt ? "duplicate" : deletePrompt ? "delete" : error ? "error" : notice ? "notice" : undefined;
+  const interactiveOverlay = settingsOpen ? "settings" : noveliaImportOpen ? "novelia" : duplicatePrompt ? "duplicate" : deletePrompt ? "delete" : error ? "error" : notice ? "notice" : undefined;
 
   const activateOverlayItem = useCallback((element: HTMLElement): boolean => {
     if (element.dataset.spatialAction !== "edit-duplicate-select") return false;
@@ -352,7 +410,7 @@ export function App() {
 
   useSpatialNavigation({
     rootRef: overlayRootRef,
-    enabled: Boolean(interactiveOverlay && interactiveOverlay !== "settings"),
+    enabled: Boolean(interactiveOverlay && interactiveOverlay !== "settings" && interactiveOverlay !== "novelia"),
     editing: duplicateSelectEditing,
     onActivate: activateOverlayItem,
     keys: "both",
@@ -370,9 +428,11 @@ export function App() {
       overlayReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     }
     if (interactiveOverlay) {
-      const frame = requestAnimationFrame(() => overlayRootRef.current?.querySelector<HTMLElement>("[data-spatial-item]")?.focus({ preventScroll: true }));
+      const frame = interactiveOverlay === "novelia"
+        ? undefined
+        : requestAnimationFrame(() => overlayRootRef.current?.querySelector<HTMLElement>("[data-spatial-item]")?.focus({ preventScroll: true }));
       previousOverlayRef.current = interactiveOverlay;
-      return () => cancelAnimationFrame(frame);
+      return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
     }
     if (previousOverlayRef.current) {
       setDuplicateSelectEditing(false);
@@ -412,6 +472,11 @@ export function App() {
             onSaveSettings={saveSettings}
             onPreviewSettings={setSettings}
             onSaveReadingPosition={saveBookReadingPosition}
+            {...(loaded.libraryBookId ? {
+              onAddBookmark: (draft: Parameters<typeof addBookBookmark>[1]) => addBookBookmark(loaded.libraryBookId as string, draft),
+              onDeleteBookmark: (bookmarkId: string) => deleteBookBookmark(loaded.libraryBookId as string, bookmarkId),
+            } : {})}
+            onError={setError}
             themes={themes}
             onImportTheme={(theme) => importCustomTheme(theme)}
             onThemesChange={setThemes}
@@ -422,7 +487,14 @@ export function App() {
             {...(selectedBookId ? { selectedBookId } : {})}
             onSelect={(bookId) => setSelectedBookId(bookId || undefined)}
             onImport={openEpubPicker}
+            onOpenNovelia={() => { setError(undefined); setNoveliaImportOpen(true); }}
             onOpenSettings={() => setSettingsOpen(true)}
+            {...(lastReadingBookId && libraryBooks.some((book) => book.id === lastReadingBookId)
+              ? { onReturnToReading: () => void readLibraryBook(lastReadingBookId, "continue") }
+              : {})}
+            switchViewShortcut={settings.shortcuts.returnLibrary}
+            fullscreenShortcut={settings.shortcuts.toggleFullscreen}
+            onToggleFullscreen={() => { void toggleFullscreenState().catch(() => setOpenIssue({ title: "无法切换全屏", message: "请检查当前窗口或浏览器的全屏权限。" })); }}
             onRead={(bookId, mode) => void readLibraryBook(bookId, mode)}
             onUpdate={updateBook}
               onDelete={(bookId) => {
@@ -443,7 +515,16 @@ export function App() {
       />}
       {overlayMessage && <div className="loading-overlay" role="status"><span className="loading-dot" />{overlayMessage}</div>}
       {dragActive && !overlayMessage && <div className="file-drop-overlay" role="status"><span>松开以导入 EPUB</span></div>}
+      {!error && openIssue && <div className="error-toast error-toast--nonmodal" role="alert"><strong>{openIssue.title}</strong><span>{openIssue.message}</span><button type="button" onClick={() => setOpenIssue(undefined)} aria-label="关闭提示">×</button></div>}
       <div className="app-spatial-overlays" ref={overlayRootRef}>
+      {noveliaImportOpen && <NoveliaImportDialog
+        onDownload={downloadNoveliaEpubFile}
+        onDownloaded={(file) => {
+          setNoveliaImportOpen(false);
+          void startImportBatch([file]);
+        }}
+        onClose={() => setNoveliaImportOpen(false)}
+      />}
       {duplicatePrompt && (
         <div className="reader-menu-backdrop">
           <div className="duplicate-dialog" role="dialog" aria-modal="true" aria-label="重复书籍">
