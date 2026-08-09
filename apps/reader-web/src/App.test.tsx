@@ -140,6 +140,9 @@ describe("App", () => {
   it("imports an EPUB, stays in the library, and selects the new book", async () => {
     const user = userEvent.setup();
     let libraryReads = 0;
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:exported-epub");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
@@ -148,6 +151,7 @@ describe("App", () => {
         return json({ version: 1, books: libraryReads === 1 ? [] : [libraryBook] });
       }
       if (url === "/api/import-epub") return json({ outcome: "imported", bookId });
+      if (url === `/api/books/${bookId}/source`) return new Response(new Uint8Array([0x50, 0x4b, 3, 4]));
       return json({ error: "unexpected request" }, 404);
     });
     render(<App />);
@@ -159,8 +163,32 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "示例书籍" })).toBeInTheDocument();
     expect(document.querySelector(".reader-app")).not.toBeInTheDocument();
     fireEvent.contextMenu(screen.getByRole("button", { name: "示例书籍" }));
-    expect(screen.getByRole("link", { name: "导出 EPUB" })).toHaveAttribute("href", `/api/books/${bookId}/source`);
-    expect(screen.getByRole("link", { name: "导出 EPUB" })).toHaveAttribute("download", "sample.epub");
+    await user.click(screen.getByRole("button", { name: "导出 EPUB" }));
+    expect(await screen.findByText("已开始导出“sample.epub”。")).toBeInTheDocument();
+    expect(click).toHaveBeenCalledOnce();
+    expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe("sample.epub");
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:exported-epub");
+  });
+
+  it("reports export failures without blocking the library", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/library") return json({ version: 1, books: [libraryBook] });
+      if (url === `/api/books/${bookId}/source`) return json({ error: "原书文件不存在。" }, 404);
+      return json({ error: "unexpected request" }, 404);
+    });
+
+    render(<App />);
+    const title = await screen.findByRole("button", { name: "示例书籍" });
+    fireEvent.contextMenu(title);
+    await user.click(screen.getByRole("button", { name: "导出 EPUB" }));
+    expect(await screen.findByText("无法导出")).toBeInTheDocument();
+    expect(screen.getByText("原书文件不存在。")).toBeInTheDocument();
+    fireEvent.contextMenu(title);
+    expect(screen.getByRole("menu", { name: "书籍操作" })).toBeInTheDocument();
   });
 
   it("downloads a Novelia EPUB and hands it to the existing import queue", async () => {

@@ -31,7 +31,7 @@ import { useSpatialNavigation } from "./spatial-navigation.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { builtinThemeOptions, importTheme as importCustomTheme, loadThemes, type AvailableTheme } from "./theme-client.js";
 import { applyTheme, BUILTIN_THEMES, DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, type ThemeDefinition } from "./themes.js";
-import { chooseDesktopEpubFiles, listenForDesktopEpubDrop } from "./desktop-files.js";
+import { chooseDesktopEpubFiles, exportOriginalEpub, listenForDesktopEpubDrop } from "./desktop-files.js";
 import { EMPTY_APP_STATE, loadAppState, saveAppState, saveLibraryFilter, type LibraryFilter } from "./app-state.js";
 import { toggleFullscreenState } from "./fullscreen.js";
 import { NoveliaImportDialog } from "./NoveliaImportDialog.js";
@@ -387,6 +387,22 @@ export function App() {
     }
   };
 
+  const exportBook = async (book: LibraryBook): Promise<void> => {
+    setLoading("正在导出 EPUB…");
+    setError(undefined);
+    setNotice(undefined);
+    setOpenIssue(undefined);
+    try {
+      const outcome = await exportOriginalEpub(book);
+      if (outcome === "saved") setNotice(`已导出“${book.sourceFileName}”。`);
+      else if (outcome === "started") setNotice(`已开始导出“${book.sourceFileName}”。`);
+    } catch (exportError) {
+      setOpenIssue({ title: "无法导出", message: (exportError as Error).message });
+    } finally {
+      setLoading(undefined);
+    }
+  };
+
   const confirmDeleteBook = async (): Promise<void> => {
     const prompt = deletePrompt;
     if (!prompt) return;
@@ -517,6 +533,7 @@ export function App() {
             fullscreenShortcut={settings.shortcuts.toggleFullscreen}
             onToggleFullscreen={() => { void toggleFullscreenState().catch(() => setOpenIssue({ title: "无法切换全屏", message: "请检查当前窗口或浏览器的全屏权限。" })); }}
             onRead={(bookId, mode) => void readLibraryBook(bookId, mode)}
+            onExport={(book) => void exportBook(book)}
             onUpdate={updateBook}
               onDelete={(bookId) => {
               const book = libraryBooks.find((candidate) => candidate.id === bookId);

@@ -8,7 +8,7 @@ const base = { sourceSha256: "a".repeat(64), sourceSize: 1024, contentKind: "chi
 const old: LibraryBook = { ...base, id: "01234567-89ab-4cde-8fab-0123456789ab", sourceFileName: "旧书.epub", title: "旧书", authors: ["甲"], collectionStatus: "completed", readingProgress: null };
 const recent: LibraryBook = { ...base, id: "11234567-89ab-4cde-8fab-0123456789ab", sourceFileName: "新书.epub", title: "新书", authors: ["乙"], collectionStatus: "reading", readingProgress: { progress: .43, chapterLabel: "第三章", updatedAt: "2026-08-06T00:00:00Z" } };
 const defaultFilterProps = { filter: "all" as const, onFilterChange: () => {} };
-const renderView = (overrides = {}) => render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} {...defaultFilterProps} {...overrides} />);
+const renderView = (overrides = {}) => render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onExport={() => {}} onUpdate={async () => {}} {...defaultFilterProps} {...overrides} />);
 
 afterEach(() => {
   cleanup();
@@ -79,7 +79,7 @@ describe("LibraryView", () => {
     await user.click(completed);
     expect(completed).toHaveFocus();
     expect(onFilterChange).toHaveBeenCalledWith("completed");
-    view.rerender(<LibraryView books={[old, recent]} selectedBookId={recent.id} filter="completed" onFilterChange={onFilterChange} onSelect={onSelect} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} />);
+    view.rerender(<LibraryView books={[old, recent]} selectedBookId={recent.id} filter="completed" onFilterChange={onFilterChange} onSelect={onSelect} onImport={() => {}} onRead={() => {}} onExport={() => {}} onUpdate={async () => {}} />);
     expect(onSelect).toHaveBeenCalledWith("");
   });
 
@@ -101,12 +101,12 @@ describe("LibraryView", () => {
   });
 
   it("animates details into and out of the fixed detail pane", () => {
-    const view = render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
+    const view = render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onExport={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
     const entering = document.querySelector<HTMLElement>(`.library-detail-layer[data-phase="entering"]`);
     expect(entering).toHaveTextContent("新书");
     fireEvent.animationEnd(entering as HTMLElement);
     expect(document.querySelector(`.library-detail-layer[data-phase="active"]`)).toHaveTextContent("新书");
-    view.rerender(<LibraryView books={[old, recent]} selectedBookId="" onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
+    view.rerender(<LibraryView books={[old, recent]} selectedBookId="" onSelect={() => {}} onImport={() => {}} onRead={() => {}} onExport={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
     const exiting = document.querySelector<HTMLElement>(`.library-detail-layer[data-phase="exiting"]`);
     expect(exiting).toHaveTextContent("新书");
     fireEvent.animationEnd(exiting as HTMLElement);
@@ -114,9 +114,9 @@ describe("LibraryView", () => {
   });
 
   it("crossfades old and new details when the selected book changes", () => {
-    const view = render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
+    const view = render(<LibraryView books={[old, recent]} selectedBookId={recent.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onExport={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
     fireEvent.animationEnd(document.querySelector(`.library-detail-layer[data-phase="entering"]`) as HTMLElement);
-    view.rerender(<LibraryView books={[old, recent]} selectedBookId={old.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
+    view.rerender(<LibraryView books={[old, recent]} selectedBookId={old.id} onSelect={() => {}} onImport={() => {}} onRead={() => {}} onExport={() => {}} onUpdate={async () => {}} {...defaultFilterProps} />);
     expect(document.querySelector(`.library-detail-layer[data-phase="exiting"]`)).toHaveTextContent("新书");
     expect(document.querySelector(`.library-detail-layer[data-phase="entering"]`)).toHaveTextContent("旧书");
   });
@@ -155,13 +155,26 @@ describe("LibraryView", () => {
   it("opens the book menu with Space or right click and invokes its actions", async () => {
     const user = userEvent.setup();
     const onRead = vi.fn();
+    const onExport = vi.fn();
     const onDelete = vi.fn();
-    renderView({ onRead, onDelete });
+    renderView({ onRead, onExport, onDelete });
     const title = screen.getByRole("button", { name: "新书" });
     title.focus();
     await user.keyboard(" ");
     let menu = screen.getByRole("menu", { name: "书籍操作" });
-    expect(within(menu).getByRole("link", { name: "导出 EPUB" })).toHaveAttribute("download", "新书.epub");
+    within(menu).getByRole("button", { name: "导出 EPUB" }).focus();
+    await user.keyboard(" ");
+    expect(onExport).toHaveBeenCalledWith(recent);
+    expect(screen.queryByRole("menu", { name: "书籍操作" })).not.toBeInTheDocument();
+    title.focus();
+    await user.keyboard(" ");
+    menu = screen.getByRole("menu", { name: "书籍操作" });
+    within(menu).getByRole("button", { name: "导出 EPUB" }).focus();
+    await user.keyboard("{Enter}");
+    expect(onExport).toHaveBeenCalledTimes(2);
+    title.focus();
+    await user.keyboard(" ");
+    menu = screen.getByRole("menu", { name: "书籍操作" });
     await user.click(within(menu).getByRole("button", { name: "继续阅读" }));
     expect(onRead).toHaveBeenCalledWith(recent.id, "continue");
     fireEvent.contextMenu(title, { clientX: 20, clientY: 30 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { coverUrl, sourceEpubUrl, type CollectionStatus, type LibraryBook } from "./library-client.js";
+import { coverUrl, type CollectionStatus, type LibraryBook } from "./library-client.js";
 import type { ShortcutBinding } from "./reader-settings.js";
 import { matchesShortcut } from "./shortcut-bindings.js";
 import { findSpatialTarget, useSpatialNavigation, type SpatialDirection } from "./spatial-navigation.js";
@@ -20,6 +20,7 @@ interface LibraryViewProps {
   fullscreenShortcut?: ShortcutBinding | null;
   onToggleFullscreen?(): void;
   onRead(bookId: string, mode?: "continue" | "beginning"): void;
+  onExport(book: LibraryBook): void;
   onUpdate(bookId: string, patch: { collectionStatus?: CollectionStatus; note?: string }): Promise<void>;
   onDelete?(bookId: string): void;
   keyboardNavigationEnabled?: boolean;
@@ -116,7 +117,7 @@ function LibraryDetailLayer({ book, phase, onAnimationComplete }: LibraryDetailL
   </div>;
 }
 
-export function LibraryView({ books, selectedBookId, filter, onFilterChange, onSelect, onImport, onOpenNovelia, onOpenSettings, onReturnToReading, switchViewShortcut, fullscreenShortcut, onToggleFullscreen, onRead, onUpdate, onDelete = () => {}, keyboardNavigationEnabled = true }: LibraryViewProps) {
+export function LibraryView({ books, selectedBookId, filter, onFilterChange, onSelect, onImport, onOpenNovelia, onOpenSettings, onReturnToReading, switchViewShortcut, fullscreenShortcut, onToggleFullscreen, onRead, onExport, onUpdate, onDelete = () => {}, keyboardNavigationEnabled = true }: LibraryViewProps) {
   const rootRef = useRef<HTMLElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const popupReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -266,7 +267,7 @@ export function LibraryView({ books, selectedBookId, filter, onFilterChange, onS
     </div>
     {popupOpen && <div className="library-popup-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) closePopup(); }}><div className="library-popup" ref={popupRef} style={{ left: actionPopup?.left, top: actionPopup?.top }} role="menu" aria-label={statusMenuOpen ? "选择收藏状态" : "书籍操作"}>
       {popupBook && statusMenuOpen && STATUS_ORDER.map((status, index) => <button key={status} type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row={String(index)} aria-selected={popupBook.collectionStatus === status} onClick={() => void onUpdate(popupBook.id, { collectionStatus: status }).then(closePopup).catch(() => {})}>{STATUS_LABELS[status]}</button>)}
-      {popupBook && !statusMenuOpen && <><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="0" onClick={() => { closePopup(); onRead(popupBook.id, "continue"); }}>继续阅读</button><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="1" onClick={() => { closePopup(); onRead(popupBook.id, "beginning"); }}>从头开始</button><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="2" data-popup-action="status" onClick={openStatusMenu}>修改状态</button><a data-spatial-item data-spatial-zone="library-popup" data-spatial-row="3" href={sourceEpubUrl(popupBook)} download={popupBook.sourceFileName} onClick={closePopup}>导出 EPUB</a><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="4" onClick={() => { closePopup(); onDelete(popupBook.id); }}>删除</button></>}
+      {popupBook && !statusMenuOpen && <><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="0" onClick={() => { closePopup(); onRead(popupBook.id, "continue"); }}>继续阅读</button><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="1" onClick={() => { closePopup(); onRead(popupBook.id, "beginning"); }}>从头开始</button><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="2" data-popup-action="status" onClick={openStatusMenu}>修改状态</button><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="3" onClick={() => { closePopup(); onExport(popupBook); }}>导出 EPUB</button><button type="button" data-spatial-item data-spatial-zone="library-popup" data-spatial-row="4" onClick={() => { closePopup(); onDelete(popupBook.id); }}>删除</button></>}
     </div></div>}
   </main>;
 }
