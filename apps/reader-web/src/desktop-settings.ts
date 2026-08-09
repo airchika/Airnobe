@@ -3,7 +3,6 @@ export interface DesktopSettings {
   toggleWindowShortcut: string | null;
   autostart: boolean;
 }
-
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -39,4 +38,3 @@ export function desktopShortcutFromEvent(event: KeyboardEvent): string | undefin
   if (!key) return undefined;
   return [event.ctrlKey ? "Ctrl" : undefined, event.altKey ? "Alt" : undefined, event.shiftKey ? "Shift" : undefined, key].filter(Boolean).join("+");
 }
-

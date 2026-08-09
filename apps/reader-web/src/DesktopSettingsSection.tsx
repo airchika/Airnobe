@@ -7,7 +7,6 @@ interface DesktopSettingsSectionProps {
   onSaveAutostart(enabled: boolean): Promise<void>;
   onError(message: string | undefined): void;
 }
-
 export function DesktopSettingsSection({ settings, onSaveShortcut, onSaveAutostart, onError }: DesktopSettingsSectionProps) {
   const [capturing, setCapturing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -68,4 +67,3 @@ export function DesktopSettingsSection({ settings, onSaveShortcut, onSaveAutosta
     <p className="settings-hint">启动后驻留系统托盘；关闭窗口只会隐藏，需从托盘退出。</p>
   </section>;
 }
-

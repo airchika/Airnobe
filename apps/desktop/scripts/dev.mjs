@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
 const desktopDirectory = resolve(import.meta.dirname, "..");
@@ -90,7 +90,10 @@ try {
   }
 
   const sidecarExists = existsSync(sidecarBinariesDirectory)
-    && readdirSync(sidecarBinariesDirectory).some((name) => name.startsWith("airnobe-sidecar-") && name.endsWith(process.platform === "win32" ? ".exe" : ""));
+    && readdirSync(sidecarBinariesDirectory).some((name) => {
+      if (!name.startsWith("airnobe-sidecar-") || !name.endsWith(process.platform === "win32" ? ".exe" : "")) return false;
+      return statSync(resolve(sidecarBinariesDirectory, name)).size > 0;
+    });
   if (!sidecarExists) run(process.execPath, [sidecarBuildScript], desktopDirectory);
 
   tauriProcess = spawn(process.execPath, [tauriCli, "dev"], {

@@ -3,6 +3,8 @@ name = "airnobe-desktop"
 version = "0.1.0"
 description = "Airnobe desktop reader"
 authors = ["Airnobe"]
+license = "GPL-3.0-only"
+repository = "https://github.com/airchika/Airnobe"
 edition = "2021"
 
 [lib]

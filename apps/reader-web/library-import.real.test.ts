@@ -8,6 +8,9 @@ import { readLibraryIndex } from "./library-store.js";
 
 const runReal = process.env.RUN_REAL_EPUB_TESTS === "1";
 const repositoryDirectory = resolve(process.cwd(), "../..");
+const realEpubDirectory = process.env.AIRNOBE_REAL_EPUB_DIR
+  ? resolve(process.env.AIRNOBE_REAL_EPUB_DIR)
+  : resolve(repositoryDirectory, "epub");
 const temporaryDirectories: string[] = [];
 
 afterAll(async () => {
@@ -16,8 +19,8 @@ afterAll(async () => {
 
 describe.skipIf(!runReal)("real EPUB library import", () => {
   it("stores Chinese P0 directly and Japanese output with a compressed base snapshot", async () => {
-    const chinesePath = join(repositoryDirectory, "zjws.epub");
-    const japanesePath = join(repositoryDirectory, "kokorokonekuto.epub");
+    const chinesePath = join(realEpubDirectory, "zjws.epub");
+    const japanesePath = join(realEpubDirectory, "kokorokonekuto.epub");
     await access(chinesePath);
     await access(japanesePath);
     const directory = await mkdtemp(join(tmpdir(), "airnobe-library-real-"));
@@ -100,7 +103,7 @@ describe.skipIf(!runReal)("real EPUB library import", () => {
   }, 120_000);
 
   it.each(["kagejitsu.epub", "mimozanoGaoBai.epub"])("imports %s without empty romaji readings", async (fileName) => {
-    const sourcePath = join(repositoryDirectory, fileName);
+    const sourcePath = join(realEpubDirectory, fileName);
     await access(sourcePath);
     const directory = await mkdtemp(join(tmpdir(), "airnobe-library-romaji-real-"));
     temporaryDirectories.push(directory);
