@@ -15,6 +15,11 @@
     "tools/*"
   ],
   "scripts": {
+    "start": "node scripts/web.mjs",
+    "stop": "node scripts/web.mjs stop",
+    "restart": "node scripts/web.mjs restart",
+    "status": "node scripts/web.mjs status",
+    "test:launcher": "node --test scripts/web-config.test.mjs",
     "verify:version": "node scripts/check-release-version.mjs",
     "setup:fonts": "node scripts/setup-fonts.mjs",
     "build": "npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && npm run build -w @airnobe/furigana && npm run build -w @airnobe/reader-web",
@@ -23,7 +28,7 @@
     "test:real": "npm run build -w @airnobe/book-format && cross-env RUN_REAL_EPUB_TESTS=1 npm run test -w @airnobe/epub-normalizer -- real-epubs",
     "convert": "npm run build -w @airnobe/book-format && tsx tools/epub-normalizer/src/cli.ts",
     "furigana": "npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && tsx tools/furigana/src/cli.ts",
-    "reader": "npm run build:guide -w @airnobe/desktop && npm run build -w @airnobe/book-format && npm run build -w @airnobe/epub-normalizer && npm run build -w @airnobe/furigana && npm run dev -w @airnobe/reader-web",
+    "reader": "node scripts/web.mjs",
     "desktop": "npm run dev -w @airnobe/desktop",
     "check:desktop": "node apps/desktop/scripts/check-cargo.mjs",
     "desktop:check": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/tauri.ps1 info"

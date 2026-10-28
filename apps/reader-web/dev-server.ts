@@ -481,7 +481,7 @@ export async function handleLocalApi(
   }
   try {
     if (request.method === "GET" && url.pathname === "/api/health") {
-      sendJson(response, 200, { status: "ok" });
+      sendJson(response, 200, { status: "ok", ...(process.env.AIRNOBE_WEB_INSTANCE ? { instance: process.env.AIRNOBE_WEB_INSTANCE } : {}) });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/import-epub") {
@@ -622,7 +622,7 @@ async function startDevelopmentServer(): Promise<void> {
   const server = await createServer({
     root: APP_DIRECTORY,
     plugins: [localBookApi()],
-    server: { host: "127.0.0.1", strictPort: true },
+    server: { host: "127.0.0.1", port: Number(process.env.AIRNOBE_WEB_PORT || 5173), strictPort: true },
   });
   await server.listen();
   server.printUrls();

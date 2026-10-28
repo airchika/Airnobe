@@ -5,6 +5,7 @@ image/
 local/
 AirnobeLibrary/
 .env
+airnobe.local.json
 .env.*
 !.env.example
 

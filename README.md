@@ -2,7 +2,43 @@
 
 Airnobe 是面向 Windows 的中日双语 EPUB 轻小说书库与阅读器。它将 EPUB 转换为统一的类型化内容结构，在同一阅读块中保留中文译文、日文原文、出版社 ruby、程序振假名和片假名罗马音。
 
-> 当前仍处于公开测试阶段，可从 [GitHub Releases](https://github.com/airchika/Airnobe/releases) 下载 Windows x64 安装器。
+> 默认推荐从源码启动网页模式，方便个人使用和随时修改。Tauri 桌面入口及 Windows 安装包仍然保留。
+
+## 一键启动与边改边用
+
+网页模式只需要 Node.js `22.13.0` 或更新版本，无需 Rust、WebView2 或 C++ Build Tools。首次在仓库执行：
+
+```powershell
+npm ci
+npm run setup:fonts
+```
+
+之后双击仓库根目录的 `Start Airnobe.cmd`：后台构建并启动本地服务，就绪后打开默认浏览器。可以为这个文件创建桌面快捷方式。重复启动会复用本仓库已运行的服务，不会启动第二份书库后端。服务启动期间再次点击不会重复打开窗口。
+
+- `Restart Airnobe.cmd`：重新构建并重启后台服务。
+- `Stop Airnobe.cmd`：停止后台服务。关闭浏览器窗口不会停止服务。
+- `npm start` / `npm run reader`：在终端启动并显示日志，支持 Ctrl+C 停止。
+- `npm run status`、`npm restart`、`npm stop`：查看状态、重启、停止。
+- 双击启动的日志位于 `.airnobe-web/*.log`。首次构建需要一些时间；若网页未打开，检查该目录中的 `err.log` 和 `out.log`。
+
+前端 `apps/reader-web/src/` 的修改由 Vite 热更新；后端和三个共享包的源码修改会自动重新编译并重启服务。编译失败时日志会显示原因，修正并保存后会重试。后端重启期间请求可能暂时失败，因此导入书籍时请等导入完成再修改后端。依赖或启动脚本修改后，请停止服务，按需执行 `npm ci`，再启动。无需生成安装包。
+
+### 固定书库目录
+
+首次启动自动生成 **不提交 Git** 的 `airnobe.local.json`。若仓库已有 `AirnobeLibrary/library.json`，继续使用该书库并记录其绝对路径；新机器默认使用用户主目录下的 `AirnobeLibrary`。不会自动移动或合并旧书库。
+
+```json
+{
+  "libraryDirectory": "E:/Books/AirnobeLibrary",
+  "port": 5173
+}
+```
+
+`libraryDirectory` 必须为绝对路径；修改配置会自动重启网页服务。更改目录表示切换书库，原目录保持原样。更改端口后请重新点击启动入口打开新地址。也可以用 `AIRNOBE_LIBRARY_DIRECTORY` 和 `AIRNOBE_WEB_PORT` 环境变量覆盖配置。网页通过仅监听 `127.0.0.1` 的 Node 服务读写书库，不依赖浏览器目录授权。
+
+此配置用于新的网页启动入口；Tauri 原有开发／发行启动方式暂时保留，正式桌面版仍使用安装目录旁的书库。不要同时使用两个后端修改同一书库。
+
+另一台电脑可以克隆源码、安装依赖后使用同样入口。更新前先停止服务，再 `git pull --ff-only`、`npm ci` 并重新启动；本机有改动时先提交或自行处理差异。GitHub 只同步代码，本机配置、书籍和阅读进度不随代码同步。
 
 ## 主要功能
 
@@ -26,7 +62,7 @@ Get-FileHash .\Airnobe_0.1.0_x64-setup.exe -Algorithm SHA256
 
 以后发布新版时，从 [Releases](https://github.com/airchika/Airnobe/releases) 下载新版安装器并覆盖安装即可。书库保存在主程序同目录的 `AirnobeLibrary/`；覆盖安装和卸载程序都会保留该目录，重新安装后可继续使用。重要书籍仍建议自行备份。
 
-## 开发环境
+## 可选的 Tauri 开发环境
 
 - Windows 10/11 与 WebView2
 - Node.js `22.13.0` 或更新版本
@@ -87,7 +123,7 @@ tools/epub-normalizer
 tools/furigana     振假名和片假名罗马音派生工具
 ```
 
-开发模式的书库保存在仓库根目录 `AirnobeLibrary/`；正式桌面版默认保存在主程序同目录的 `AirnobeLibrary/`。书籍、设置、进度和书签均保存在本机，不上传到 Airnobe 服务。
+网页启动入口的书库位置由 `airnobe.local.json` 决定；原有 Tauri 开发模式默认使用仓库根目录 `AirnobeLibrary/`，正式桌面版默认保存在主程序同目录的 `AirnobeLibrary/`。书籍、设置、进度和书签均保存在本机，不上传到 Airnobe 服务。
 
 ## 使用边界
 
