@@ -131,6 +131,12 @@ function extensionForMediaType(mediaType: string): string {
   }
 }
 
+function fragmentNames(element: Element): string[] {
+  const id = attr(element, "id");
+  const name = localName(element) === "a" ? attr(element, "name") : undefined;
+  return [...new Set([id, name].filter((value): value is string => Boolean(value)))];
+}
+
 function sourceRef(candidate: Candidate, sourcePath: string): SourceRef {
   const elementId = attr(candidate.element, "id");
   return {
@@ -545,9 +551,8 @@ export async function parseContentDocument(
       if (elementId) anchors[elementId] = blockId;
     }
     for (const element of [candidate.element, ...translationsByAnchor.get(candidate.element)?.map((item) => item.element) ?? []]) {
-      for (const descendant of descendantElements(element)) {
-        const descendantId = attr(descendant, "id");
-        if (descendantId) anchors[descendantId] = blockId;
+      for (const descendant of [element, ...descendantElements(element)]) {
+        for (const fragment of fragmentNames(descendant)) anchors[fragment] = blockId;
       }
     }
   }
@@ -562,8 +567,7 @@ export async function parseContentDocument(
     if (kind === "spacer") {
       blocks.push({ id: blockId, type: "spacer", sourceRef: ref });
       for (const current of [element, ...descendantElements(element)]) {
-        const elementId = attr(current, "id");
-        if (elementId) anchors[elementId] = blockId;
+        for (const fragment of fragmentNames(current)) anchors[fragment] = blockId;
       }
       continue;
     }
@@ -662,8 +666,9 @@ export async function parseContentDocument(
   const fallbackBlockId = blocks[0]?.id;
   if (fallbackBlockId) {
     for (const element of descendantElements(dom)) {
-      const elementId = attr(element, "id");
-      if (elementId && !anchors[elementId]) anchors[elementId] = fallbackBlockId;
+      for (const fragment of fragmentNames(element)) {
+        if (!Object.hasOwn(anchors, fragment)) anchors[fragment] = fallbackBlockId;
+      }
     }
   }
   return { id: documentId, sourcePath, role, anchors, blocks };

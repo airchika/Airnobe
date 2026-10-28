@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { inlinePlainText } from "@airnobe/book-format";
 import { parseConvertArgs, runConvertCli } from "./cli.js";
 import { convertEpubBytes } from "./convert.js";
-import { writeConversionAtomically } from "./output.js";
+import { validateConversionResult, writeConversionAtomically } from "./output.js";
 import { makeEpubFixture } from "./test-fixture.js";
 
 const temporaryDirectories: string[] = [];
@@ -15,6 +15,20 @@ afterEach(async () => {
 });
 
 describe("EPUB normalizer", () => {
+  it.each([false, true])("resolves legacy named anchors in EPUB2=%s navigation and body links", async (epub2) => {
+    const bodyMarkup = `<div><a name="start"></a><h1>第一章</h1></div>
+      <p><a id="modern" name="legacy"></a>正文<a href="#legacy">跳转</a><a href="#modern">新版锚点</a></p>
+      <p><a name="gap"></a><br/></p><p>结尾</p><span name="not-an-anchor"></span>`;
+    const result = await convertEpubBytes(await makeEpubFixture({ epub2, bodyMarkup }), "named-anchors.epub");
+    const document = result.documents[0]!;
+    expect(document.anchors.start).toBe(document.blocks[0]?.id);
+    expect(document.anchors.legacy).toBe(document.blocks[1]?.id);
+    expect(document.anchors.modern).toBe(document.blocks[1]?.id);
+    expect(document.anchors.gap).toBe(document.blocks[2]?.id);
+    expect(document.anchors).not.toHaveProperty("not-an-anchor");
+    expect(() => validateConversionResult(result)).not.toThrow();
+  });
+
   it("uses EPUB3 nav semantics but excludes nav from readingOrder", async () => {
     const result = await convertEpubBytes(await makeEpubFixture(), "fixture.epub");
     expect(result.report.metrics.spineDocumentCount).toBe(2);
