@@ -2,6 +2,27 @@ import { describe, expect, it } from "vitest";
 import { assignShortcutBinding, DEFAULT_READER_SETTINGS, DEFAULT_SHORTCUTS, parseReaderSettings } from "./reader-settings.js";
 
 describe("reader settings v13", () => {
+  it("loads settings saved before font selection without resetting typography or shortcuts", () => {
+    const legacy = structuredClone(DEFAULT_READER_SETTINGS);
+    legacy.appearance.typography.fontSize = 22;
+    legacy.shortcuts.toggleJapanese = { code: "Digit9" };
+    const typography = legacy.appearance.typography as Partial<typeof legacy.appearance.typography>;
+    delete typography.chineseFont;
+    delete typography.japaneseFont;
+    const parsed = parseReaderSettings(legacy);
+    expect(parsed?.appearance.typography).toMatchObject({ fontSize: 22, chineseFont: "sarasa", japaneseFont: "sarasa" });
+    expect(parsed?.shortcuts.toggleJapanese).toEqual({ code: "Digit9" });
+  });
+
+  it("round trips independent font choices and rejects unknown fonts", () => {
+    const settings = structuredClone(DEFAULT_READER_SETTINGS);
+    settings.appearance.typography.chineseFont = "noto-serif";
+    settings.appearance.typography.japaneseFont = "system-serif";
+    expect(parseReaderSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+    settings.appearance.typography.chineseFont = "liberation-serif";
+    expect(parseReaderSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+    expect(parseReaderSettings({ ...settings, appearance: { ...settings.appearance, typography: { ...settings.appearance.typography, chineseFont: "unknown" } } })).toBeUndefined();
+  });
   it("accepts the current settings, empty bindings, and the 800 weight", () => {
     const settings = structuredClone(DEFAULT_READER_SETTINGS);
     settings.appearance.typography.fontWeight = 800;

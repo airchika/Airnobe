@@ -42,6 +42,8 @@ npm run setup:fonts
 
 ## 主要功能
 
+阅读时右键打开侧栏，在「排版与样式」中可分别选择中文、日文字体，即时预览并自动保存。提供更纱黑体、Noto Serif、Noto Sans、Windows 宋体／明朝体和黑体，以及 calibre 附带的 Liberation Serif；日文注音跟随日文字体。更纱字体由项目准备，Liberation Serif 2.1.5 随应用提供（[OFL-1.1 许可证](apps/reader-web/public/fonts/liberation/LICENSE.txt)）；Liberation 主要覆盖西文，中日文搭配 Noto Serif 或系统宋体／明朝体。其余字体使用本机安装的版本，缺少时按字体列表回退。旧设置默认保留更纱黑体及原有字号、快捷键等选项。
+
 - 本地 EPUB 书库，支持批量选择和文件拖放导入、完整哈希查重、收藏状态、原书导出与删除。
 - 中日对照、纯中文和纯日文内容；出版社原生 ruby 始终保留。
 - 使用 Kuromoji/IPADIC 生成辅助振假名，并为片假名词生成改良赫本式罗马音。

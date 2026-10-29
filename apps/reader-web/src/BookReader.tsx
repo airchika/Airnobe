@@ -12,6 +12,7 @@ import { inlinePlainText } from "@airnobe/book-format";
 import { hasAssistedRuby, hasKatakanaRomaji, type LoadedBook } from "./book-source.js";
 import { InlineContent, type RubyVisibilityPhase } from "./InlineContent.js";
 import { SettingsPanel } from "./SettingsPanel.js";
+import { READER_FONTS } from "./reader-fonts.js";
 import type { AvailableTheme } from "./theme-client.js";
 import type { ThemeDefinition } from "./themes.js";
 import type { ReadingPosition } from "./reading-state.js";
@@ -698,15 +699,15 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     let active = true;
     if (!activeAnchorRef.current) beginLayoutAnchorLock(5_000);
     void Promise.all([
-      document.fonts.load(`${settings.appearance.typography.fontWeight} ${settings.appearance.typography.fontSize}px "Sarasa Gothic SC"`),
-      document.fonts.load(`${settings.appearance.typography.fontWeight} ${settings.appearance.typography.fontSize}px "Sarasa Gothic J"`),
+      document.fonts.load(`${settings.appearance.typography.fontWeight} ${settings.appearance.typography.fontSize}px ${READER_FONTS.zh[settings.appearance.typography.chineseFont].family}`),
+      document.fonts.load(`${settings.appearance.typography.fontWeight} ${settings.appearance.typography.fontSize}px ${READER_FONTS.ja[settings.appearance.typography.japaneseFont].family}`),
     ]).then(() => {
       if (!active) return;
       adjustActiveAnchor();
       if (activeAnchorRef.current?.kind === "layout") releaseActiveAnchor(true);
     });
     return () => { active = false; };
-  }, [adjustActiveAnchor, beginLayoutAnchorLock, releaseActiveAnchor, settings.appearance.typography.fontSize, settings.appearance.typography.fontWeight]);
+  }, [adjustActiveAnchor, beginLayoutAnchorLock, releaseActiveAnchor, settings.appearance.typography.fontSize, settings.appearance.typography.fontWeight, settings.appearance.typography.chineseFont, settings.appearance.typography.japaneseFont]);
 
   const animateLayoutWithAnchor = useCallback((update: () => void, duration = LAYOUT_ANCHOR_LOCK_MS) => {
     beginLayoutAnchorLock(duration);
@@ -1165,6 +1166,8 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       style={{
         "--reading-width": `${settings.appearance.typography.columnWidth}px`,
         "--reader-font-size": `${settings.appearance.typography.fontSize}px`,
+        "--reader-chinese-font": READER_FONTS.zh[settings.appearance.typography.chineseFont].family,
+        "--reader-japanese-font": READER_FONTS.ja[settings.appearance.typography.japaneseFont].family,
         "--reader-font-weight": settings.appearance.typography.fontWeight,
         "--reader-line-height": settings.appearance.typography.lineHeight,
         "--reader-paragraph-spacing": `${settings.appearance.typography.paragraphSpacing}em`,
@@ -1190,7 +1193,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
                 data-virtual-row
                 key={virtualRow.key}
                 ref={measureVirtualRow}
-                style={{ transform: `translateY(${virtualRow.start}px)` }}
+                style={{ top: `${virtualRow.start}px` }}
               >
                 <Block
                   block={row.block}

@@ -1,5 +1,6 @@
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, isThemeId } from "./themes.js";
 import { apiFetch } from "./api-transport.js";
+import { isReaderFontId, type ReaderFontId } from "./reader-fonts.js";
 
 export const NAVIGATION_SHORTCUT_ACTIONS = ["topBackward", "topForward", "bottomBackward", "bottomForward", "pageUp", "pageDown"] as const;
 export const DISPLAY_SHORTCUT_ACTIONS = ["toggleJapanese", "toggleAssistedRuby", "toggleKatakanaRomaji", "toggleSidebar", "toggleFullscreen", "addBookmark", "returnLibrary"] as const;
@@ -13,7 +14,7 @@ export type ThemeMode = "day" | "night" | "system";
 
 export interface ReaderAppearance {
   theme: { mode: ThemeMode; lightThemeId: string; darkThemeId: string };
-  typography: { fontSize: number; fontWeight: 400 | 600 | 800; lineHeight: number; paragraphSpacing: number; columnWidth: number; chineseOpacity: number; japaneseOpacity: number; rubyScale: number };
+  typography: { chineseFont: ReaderFontId; japaneseFont: ReaderFontId; fontSize: number; fontWeight: 400 | 600 | 800; lineHeight: number; paragraphSpacing: number; columnWidth: number; chineseOpacity: number; japaneseOpacity: number; rubyScale: number };
   display: { showJapanese: boolean; showAssistedRuby: boolean; showKatakanaRomaji: boolean; showJapaneseRule: boolean; showProgressBars: boolean };
 }
 export interface ReaderSettings {
@@ -26,7 +27,7 @@ export interface ReaderSettings {
 
 export const DEFAULT_READER_APPEARANCE: ReaderAppearance = {
   theme: { mode: "night", lightThemeId: DEFAULT_LIGHT_THEME_ID, darkThemeId: DEFAULT_DARK_THEME_ID },
-  typography: { fontSize: 19, fontWeight: 400, lineHeight: 1.6, paragraphSpacing: 1, columnWidth: 760, chineseOpacity: 1, japaneseOpacity: 0.6, rubyScale: 0.6 },
+  typography: { chineseFont: "sarasa", japaneseFont: "sarasa", fontSize: 19, fontWeight: 400, lineHeight: 1.6, paragraphSpacing: 1, columnWidth: 760, chineseOpacity: 1, japaneseOpacity: 0.6, rubyScale: 0.6 },
   display: { showJapanese: false, showAssistedRuby: false, showKatakanaRomaji: false, showJapaneseRule: true, showProgressBars: true },
 };
 export const DEFAULT_SHORTCUTS: ShortcutMap = {
@@ -61,6 +62,9 @@ export function parseReaderAppearance(value: unknown): ReaderAppearance | undefi
   const typography = record.typography as Record<string, unknown> | undefined;
   const display = record.display as Record<string, unknown> | undefined;
   if (!theme || !typography || !display) return undefined;
+  const chineseFont = typography.chineseFont === undefined ? "sarasa" : typography.chineseFont;
+  const japaneseFont = typography.japaneseFont === undefined ? "sarasa" : typography.japaneseFont;
+  if (!isReaderFontId(chineseFont) || !isReaderFontId(japaneseFont)) return undefined;
   if (!["day", "night", "system"].includes(String(theme.mode)) || !isThemeId(theme.lightThemeId) || !isThemeId(theme.darkThemeId)) return undefined;
   if (!Number.isInteger(typography.fontSize) || !finiteRange(typography.fontSize, 14, 30) || ![400, 600, 800].includes(Number(typography.fontWeight))) return undefined;
   if (!finiteRange(typography.lineHeight, 1.4, 2.2) || !finiteRange(typography.paragraphSpacing, 0, 2) || !Number.isInteger(typography.columnWidth) || !finiteRange(typography.columnWidth, 520, 1200) || !finiteRange(typography.chineseOpacity, 0.2, 1) || !finiteRange(typography.japaneseOpacity, 0.2, 1) || !finiteRange(typography.rubyScale, 0.45, 0.8)) return undefined;
@@ -68,7 +72,7 @@ export function parseReaderAppearance(value: unknown): ReaderAppearance | undefi
   if (displayKeys.some((key) => typeof display[key] !== "boolean")) return undefined;
   return {
     theme: { mode: theme.mode as ThemeMode, lightThemeId: theme.lightThemeId, darkThemeId: theme.darkThemeId },
-    typography: typography as ReaderAppearance["typography"],
+    typography: { ...(typography as ReaderAppearance["typography"]), chineseFont, japaneseFont },
     display: Object.fromEntries(displayKeys.map((key) => [key, display[key]])) as unknown as ReaderAppearance["display"],
   };
 }
@@ -84,7 +88,7 @@ function legacyAppearance(value: unknown, version: number): ReaderAppearance | u
   const next = structuredClone(DEFAULT_READER_APPEARANCE);
   next.theme.darkThemeId = record.themeId;
   if (record.themeId === DEFAULT_LIGHT_THEME_ID) { next.theme.lightThemeId = record.themeId; next.theme.mode = "day"; }
-  next.typography = { fontSize: Number(typography.fontSize), fontWeight: typography.fontWeight as 400 | 600, lineHeight, paragraphSpacing: legacyV5 ? 1 : Number(typography.paragraphSpacing), columnWidth: Number(typography.columnWidth), chineseOpacity: 1, japaneseOpacity: Number(typography.japaneseOpacity), rubyScale: 0.6 };
+  next.typography = { chineseFont: "sarasa", japaneseFont: "sarasa", fontSize: Number(typography.fontSize), fontWeight: typography.fontWeight as 400 | 600, lineHeight, paragraphSpacing: legacyV5 ? 1 : Number(typography.paragraphSpacing), columnWidth: Number(typography.columnWidth), chineseOpacity: 1, japaneseOpacity: Number(typography.japaneseOpacity), rubyScale: 0.6 };
   next.display = { ...next.display, showJapanese: Boolean(defaults.showJapanese), showAssistedRuby: Boolean(defaults.showAssistedRuby), showKatakanaRomaji: Boolean(defaults.showKatakanaRomaji) };
   return parseReaderAppearance(next);
 }
