@@ -18,6 +18,7 @@ import type { ThemeDefinition } from "./themes.js";
 import type { ReadingPosition } from "./reading-state.js";
 import type { BookmarkDraft, BookmarkMutationResult, BookmarkState } from "./bookmarks.js";
 import { useSpatialNavigation } from "./spatial-navigation.js";
+import { useGamepadPaging } from "./use-gamepad-paging.js";
 import { isTauriRuntime, setFullscreenState, toggleFullscreenState, watchFullscreenState } from "./fullscreen.js";
 import {
   assignShortcutBinding,
@@ -993,6 +994,17 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     }
     onReturnToLibrary();
   }, [closeSidebar, onReturnToLibrary, persistReadingPosition]);
+
+  useGamepadPaging(keyboardNavigationEnabled && !sidebarOpen && !shortcutDialogOpen, (direction) => {
+    restoreCancelRef.current?.();
+    turnPage(direction);
+  }, (action) => {
+    if (action === "toggleJapanese") toggleJapanese();
+    else if (action === "toggleAssistedRuby") toggleAssistedRuby();
+    else if (action === "toggleKatakanaRomaji") toggleKatakanaRomaji();
+    else if (action === "toggleFullscreen") toggleFullscreen();
+    else if (action === "returnLibrary") void returnToLibrary();
+  });
 
   useSpatialNavigation({
     rootRef: sidebarRootRef,
