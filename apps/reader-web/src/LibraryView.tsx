@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { coverUrl, type CollectionStatus, type LibraryBook } from "./library-client.js";
 import type { ShortcutBinding } from "./reader-settings.js";
 import { matchesShortcut } from "./shortcut-bindings.js";
-import { findSpatialTarget, useSpatialNavigation, type SpatialDirection } from "./spatial-navigation.js";
+import { findSpatialTarget, spatialItems, useSpatialNavigation, type SpatialDirection } from "./spatial-navigation.js";
+import { useGamepadPaging } from "./use-gamepad-paging.js";
 import noveliaIcon from "./assets/novelia-icon.svg";
 import type { LibraryFilter } from "./app-state.js";
 
@@ -222,6 +223,39 @@ export function LibraryView({ books, selectedBookId, filter, onFilterChange, onS
     return true;
   } });
   useSpatialNavigation({ rootRef: popupRef, enabled: keyboardNavigationEnabled && popupOpen, keys: "both", onCancel: () => { if (statusMenuOpen) { setStatusMenuOpen(false); requestAnimationFrame(() => popupRef.current?.querySelector<HTMLElement>("[data-popup-action='status']")?.focus({ preventScroll: true })); return true; } closePopup(); return true; } });
+  const gamepadCurrentItem = (): HTMLElement | undefined => {
+    const root = popupOpen ? popupRef.current : rootRef.current;
+    if (!root) return undefined;
+    const items = spatialItems(root);
+    const active = document.activeElement as HTMLElement | null;
+    return active && items.includes(active) ? active
+      : items.find((item) => item.dataset.libraryBookId === selectedBookId) ?? items[0];
+  };
+  useGamepadPaging(keyboardNavigationEnabled, (direction) => {
+    const root = popupOpen ? popupRef.current : rootRef.current;
+    const current = gamepadCurrentItem();
+    if (!root || !current) return;
+    const target = (popupOpen ? findSpatialTarget : resolveLibrarySpatialTarget)(spatialItems(root), current, direction);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, (action) => {
+    if (action === "toggleFullscreen") { onToggleFullscreen?.(); return; }
+    if (action === "returnLibrary") { onReturnToReading?.(); return; }
+    if (action === "topBackward") {
+      if (statusMenuOpen) {
+        setStatusMenuOpen(false);
+        requestAnimationFrame(() => popupRef.current?.querySelector<HTMLElement>("[data-popup-action='status']")?.focus({ preventScroll: true }));
+      } else if (popupOpen) closePopup();
+      return;
+    }
+    if (action !== "topForward") return;
+    const current = gamepadCurrentItem();
+    if (!current) return;
+    if (!popupOpen && current.dataset.spatialAction === "book-actions") {
+      const book = books.find((candidate) => candidate.id === current.dataset.libraryBookId);
+      if (book) openActionPopup(book, current);
+    } else current.click();
+  });
   useEffect(() => {
     if (!keyboardNavigationEnabled || popupOpen) return;
     const listener = (event: KeyboardEvent): void => {

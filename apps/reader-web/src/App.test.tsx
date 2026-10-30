@@ -88,6 +88,42 @@ describe("App", () => {
     expect(loadReaderSession()).toBeUndefined();
   });
 
+  it.each(["keyboard", "gamepad", "wheel"])("dismisses a reading notice on %s input without blocking that input", async (inputKind) => {
+    const demo = createDemoBook();
+    saveReaderSession(bookId, null);
+    const buttons = Array.from({ length: 16 }, () => ({ pressed: false, touched: false, value: 0 }));
+    const getGamepads = vi.fn(() => [{ index: 0, connected: true, mapping: "standard", axes: [0, 0, 0, 0], buttons }] as unknown as Gamepad[]);
+    Object.defineProperty(navigator, "getGamepads", { configurable: true, value: getGamepads });
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const scrollBy = vi.spyOn(window, "scrollBy");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json({ ...DEFAULT_READER_SETTINGS, pageTransitions: false });
+      if (url === "/api/library") return json({ version: 1, books: [libraryBook] });
+      if (url === "/api/app-state") return json({ version: 2, lastReadingBookId: bookId, libraryFilter: "all" });
+      if (url === `/api/books/${bookId}`) return json({ book: demo.book, documents: demo.documents, readingState: demo.readingState, bookmarkState: demo.bookmarkState });
+      if (url.endsWith("/reading-state") && init?.method === "PUT") return json({ version: 1, position: JSON.parse(String(init.body)).position, updatedAt: new Date().toISOString() });
+      return json({ error: "unexpected request" }, 404);
+    });
+    try {
+      render(<App />);
+      await waitFor(() => expect(document.querySelector(".reader-app")).toBeInTheDocument());
+      await waitFor(() => expect(getGamepads).toHaveBeenCalled());
+      fireEvent.change(screen.getByLabelText("选择 EPUB 文件"), { target: { files: [new File(["invalid"], "notes.txt", { type: "text/plain" })] } });
+      expect(await screen.findByText(/没有可导入的 EPUB/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "关闭提示" })).not.toHaveFocus();
+      scrollBy.mockClear();
+      if (inputKind === "keyboard") fireEvent.keyDown(window, { key: "d", code: "KeyD" });
+      else if (inputKind === "gamepad") buttons[15] = { pressed: true, touched: true, value: 1 };
+      else fireEvent.wheel(window, { deltaY: 100 });
+      await waitFor(() => expect(screen.queryByText(/没有可导入的 EPUB/)).not.toBeInTheDocument());
+      if (inputKind !== "wheel") expect(scrollBy).toHaveBeenCalledWith({ top: window.innerHeight, behavior: "instant" });
+    } finally {
+      delete (navigator as Partial<Navigator>).getGamepads;
+      demo.dispose();
+    }
+  });
+
   it("opens into the minimal library view", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);

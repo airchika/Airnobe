@@ -1,26 +1,37 @@
 import { useEffect, useRef } from "react";
 
-type Direction = -1 | 0 | 1;
+export type GamepadDirection = "up" | "down" | "left" | "right";
+type Direction = GamepadDirection | null;
 
 export const GAMEPAD_ACTIONS = [
-  { button: 0, action: "toggleJapanese" },
-  { button: 2, action: "toggleAssistedRuby" },
-  { button: 3, action: "toggleKatakanaRomaji" },
-  { button: 9, action: "toggleFullscreen" },
-  { button: 1, action: "returnLibrary" },
+  { button: 0, action: "topForward" },
+  { button: 1, action: "topBackward" },
+  { button: 2, action: "toggleJapanese" },
+  { button: 4, action: "toggleAssistedRuby" },
+  { button: 5, action: "toggleKatakanaRomaji" },
+  { button: 7, action: "toggleFullscreen" },
+  { button: 3, action: "returnLibrary" },
 ] as const;
 export type GamepadAction = typeof GAMEPAD_ACTIONS[number]["action"];
 
 function direction(pad: Gamepad): Direction {
-  const previous = pad.buttons[12]?.pressed || pad.buttons[14]?.pressed;
-  const next = pad.buttons[13]?.pressed || pad.buttons[15]?.pressed;
-  if (previous || next) return previous === next ? 0 : previous ? -1 : 1;
-  // Both sticks work; use the strongest axis so diagonals produce one action.
-  const axis = pad.axes.slice(0, 4).reduce((best, value) => Math.abs(value) > Math.abs(best) ? value : best, 0);
-  return Math.abs(axis) < 0.55 ? 0 : axis < 0 ? -1 : 1;
+  const horizontal = Number(Boolean(pad.buttons[15]?.pressed)) - Number(Boolean(pad.buttons[14]?.pressed));
+  const vertical = Number(Boolean(pad.buttons[13]?.pressed)) - Number(Boolean(pad.buttons[12]?.pressed));
+  if (pad.buttons.slice(12, 16).some((button) => button.pressed)) {
+    if (vertical) return vertical < 0 ? "up" : "down";
+    return horizontal ? horizontal < 0 ? "left" : "right" : null;
+  }
+  // Both sticks work; the strongest axis selects one direction for diagonals.
+  let strongest = 0;
+  let axisIndex = 0;
+  pad.axes.slice(0, 4).forEach((value, index) => {
+    if (Math.abs(value) > Math.abs(strongest)) { strongest = value; axisIndex = index; }
+  });
+  if (Math.abs(strongest) < 0.55) return null;
+  return axisIndex % 2 === 0 ? strongest < 0 ? "left" : "right" : strongest < 0 ? "up" : "down";
 }
 
-export function useGamepadPaging(enabled: boolean, onPage: (direction: -1 | 1) => void, onAction?: (action: GamepadAction) => void): void {
+export function useGamepadPaging(enabled: boolean, onPage: (direction: GamepadDirection) => void, onAction?: (action: GamepadAction) => void): void {
   const onPageRef = useRef(onPage);
   onPageRef.current = onPage;
   const onActionRef = useRef(onAction);
@@ -28,12 +39,12 @@ export function useGamepadPaging(enabled: boolean, onPage: (direction: -1 | 1) =
 
   useEffect(() => {
     if (!enabled || typeof navigator.getGamepads !== "function") return;
-    let held: Direction = 0;
+    let held: Direction = null;
     let nextRepeat = 0;
     let ready = false;
     let padIndex: number | undefined;
     let pressedButtons = new Set<number>();
-    const reset = (): void => { held = 0; ready = false; pressedButtons.clear(); };
+    const reset = (): void => { held = null; ready = false; pressedButtons.clear(); };
     const timer = window.setInterval(() => {
       const target = document.activeElement as HTMLElement | null;
       if (!document.hasFocus() || document.visibilityState !== "visible"
@@ -63,7 +74,7 @@ export function useGamepadPaging(enabled: boolean, onPage: (direction: -1 | 1) =
         return;
       }
       for (const { action } of actions) onActionRef.current?.(action);
-      if (!current) { held = 0; return; }
+      if (!current) { held = null; return; }
       const now = performance.now();
       if (current !== held) {
         held = current;

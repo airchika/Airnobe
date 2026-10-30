@@ -17,6 +17,48 @@ afterEach(() => {
 });
 
 describe("LibraryView", () => {
+  it("navigates books and menus with a gamepad and uses RT for fullscreen", () => {
+    vi.useFakeTimers();
+    const buttons = Array.from({ length: 16 }, () => ({ pressed: false, touched: false, value: 0 }));
+    const pad = { index: 0, connected: true, mapping: "standard", axes: [0, 0, 0, 0], buttons };
+    vi.stubGlobal("navigator", Object.assign(Object.create(navigator), { getGamepads: () => [pad] }));
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const tick = () => act(() => { vi.advanceTimersByTime(100); });
+    const press = (index: number) => {
+      buttons[index] = { pressed: true, touched: true, value: 1 };
+      tick();
+      buttons[index] = { pressed: false, touched: false, value: 0 };
+      tick();
+    };
+    try {
+      const onRead = vi.fn();
+      const onToggleFullscreen = vi.fn();
+      const onReturnToReading = vi.fn();
+      renderView({ onRead, onToggleFullscreen, onReturnToReading });
+      tick();
+      screen.getByRole("button", { name: "新书" }).focus();
+      press(13);
+      expect(screen.getByRole("button", { name: "旧书" })).toHaveFocus();
+      press(0);
+      expect(screen.getByRole("menu", { name: "书籍操作" })).toBeInTheDocument();
+      press(1);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      press(0);
+      press(0);
+      expect(onRead).toHaveBeenCalledWith(old.id, "continue");
+      press(9);
+      expect(onToggleFullscreen).not.toHaveBeenCalled();
+      press(7);
+      expect(onToggleFullscreen).toHaveBeenCalledOnce();
+      press(3);
+      expect(onReturnToReading).toHaveBeenCalledOnce();
+    } finally {
+      focus.mockRestore();
+      visibility.mockRestore();
+    }
+  });
+
   it("sorts opened books first and exposes sortable three-column headers", () => {
     renderView();
     const list = screen.getByLabelText("书籍列表");

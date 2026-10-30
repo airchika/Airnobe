@@ -22,7 +22,7 @@ describe("useGamepadPaging", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([[12, -1], [13, 1], [14, -1], [15, 1]])("maps D-pad button %i to page %i", (index, expected) => {
+  it.each([[12, "up"], [13, "down"], [14, "left"], [15, "right"]])("maps D-pad button %i to direction %s", (index, expected) => {
     const page = vi.fn();
     renderHook(() => useGamepadPaging(true, page));
     tick();
@@ -48,10 +48,10 @@ describe("useGamepadPaging", () => {
     expect(page).not.toHaveBeenCalled();
     (pad.axes as number[])[axis] = -0.8;
     tick();
-    expect(page).toHaveBeenLastCalledWith(-1);
+    expect(page).toHaveBeenLastCalledWith(axis % 2 === 0 ? "left" : "up");
     (pad.axes as number[])[axis] = 0.8;
     tick();
-    expect(page).toHaveBeenLastCalledWith(1);
+    expect(page).toHaveBeenLastCalledWith(axis % 2 === 0 ? "right" : "down");
     expect(page).toHaveBeenCalledTimes(2);
   });
 
@@ -84,8 +84,9 @@ describe("useGamepadPaging", () => {
   });
 
   it.each([
-    [0, "toggleJapanese"], [2, "toggleAssistedRuby"], [3, "toggleKatakanaRomaji"],
-    [9, "toggleFullscreen"], [1, "returnLibrary"],
+    [0, "topForward"], [1, "topBackward"], [2, "toggleJapanese"],
+    [4, "toggleAssistedRuby"], [5, "toggleKatakanaRomaji"],
+    [7, "toggleFullscreen"], [3, "returnLibrary"],
   ] as const)("maps button %i to %s once per press", (index, expected) => {
     const action = vi.fn();
     const page = vi.fn();
@@ -130,7 +131,7 @@ describe("useGamepadPaging", () => {
     const page = vi.fn();
     renderHook(() => useGamepadPaging(true, page, action));
     tick();
-    button(1, true);
+    button(3, true);
     button(0, true);
     button(13, true);
     tick(1_000);

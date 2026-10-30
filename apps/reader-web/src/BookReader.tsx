@@ -48,6 +48,7 @@ interface BookReaderProps {
   onDeleteBookmark?(bookmarkId: string): Promise<BookmarkState>;
   onError?(message: string): void;
   keyboardNavigationEnabled?: boolean;
+  onInteraction?(): void;
 }
 
 interface ReadingAnchor {
@@ -344,7 +345,7 @@ function ShortcutColumn({ title, actions, zone, zoneOrder, shortcuts, capturingA
   );
 }
 
-export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings, onPreviewSettings = () => {}, onSaveReadingPosition, onAddBookmark, onDeleteBookmark, onError = () => {}, themes = [], onImportTheme = async () => { throw new Error("主题导入不可用。"); }, onThemesChange = () => {}, keyboardNavigationEnabled = true }: BookReaderProps) {
+export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings, onPreviewSettings = () => {}, onSaveReadingPosition, onAddBookmark, onDeleteBookmark, onError = () => {}, themes = [], onImportTheme = async () => { throw new Error("主题导入不可用。"); }, onThemesChange = () => {}, keyboardNavigationEnabled = true, onInteraction }: BookReaderProps) {
   const [showJapanese, setShowJapanese] = useState(() => settings.appearance.display.showJapanese);
   const [showAssistedRuby, setShowAssistedRuby] = useState(() => settings.appearance.display.showAssistedRuby);
   const [showKatakanaRomaji, setShowKatakanaRomaji] = useState(() => settings.appearance.display.showKatakanaRomaji);
@@ -459,7 +460,8 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     },
     measureElement: (element) => element.getBoundingClientRect().height,
     overscan: OVERSCAN,
-    scrollPaddingStart: READING_EDGE,
+    // Keep a comfortable top inset, reduced from 24px to clear the preceding rule.
+    scrollPaddingStart: 20,
     initialOffset: initialScrollOffset,
     useFlushSync: true,
   });
@@ -996,10 +998,17 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
   }, [closeSidebar, onReturnToLibrary, persistReadingPosition]);
 
   useGamepadPaging(keyboardNavigationEnabled && !sidebarOpen && !shortcutDialogOpen, (direction) => {
+    onInteraction?.();
     restoreCancelRef.current?.();
-    turnPage(direction);
+    if (direction === "up" || direction === "down") jumpNavigationUnit(direction === "up" ? -1 : 1, "top", navigation.textSteps);
+    else turnPage(direction === "left" ? -1 : 1);
   }, (action) => {
-    if (action === "toggleJapanese") toggleJapanese();
+    onInteraction?.();
+    if (action === "topForward" || action === "topBackward") {
+      restoreCancelRef.current?.();
+      jumpNavigationUnit(action === "topForward" ? 1 : -1, "top", navigation.textSteps);
+    }
+    else if (action === "toggleJapanese") toggleJapanese();
     else if (action === "toggleAssistedRuby") toggleAssistedRuby();
     else if (action === "toggleKatakanaRomaji") toggleKatakanaRomaji();
     else if (action === "toggleFullscreen") toggleFullscreen();

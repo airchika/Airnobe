@@ -460,7 +460,7 @@ export function App() {
   };
 
   const overlayMessage = loading ?? (libraryLoading && !loaded ? "正在加载书库…" : undefined);
-  const interactiveOverlay = settingsOpen ? "settings" : noveliaImportOpen ? "novelia" : duplicatePrompt ? "duplicate" : deletePrompt ? "delete" : error ? "error" : notice ? "notice" : undefined;
+  const interactiveOverlay = settingsOpen ? "settings" : noveliaImportOpen ? "novelia" : duplicatePrompt ? "duplicate" : deletePrompt ? "delete" : error ? "error" : notice && !loaded ? "notice" : undefined;
 
   const activateOverlayItem = useCallback((element: HTMLElement): boolean => {
     if (element.dataset.spatialAction !== "edit-duplicate-select") return false;
@@ -502,6 +502,17 @@ export function App() {
     previousOverlayRef.current = undefined;
   }, [interactiveOverlay]);
 
+  const dismissReadingNotice = useCallback(() => setNotice(undefined), []);
+  useEffect(() => {
+    if (!loaded || !notice) return;
+    // Observe input without consuming it: the same event still reaches the reader.
+    const events = ["keydown", "pointerdown", "wheel", "touchstart"] as const;
+    for (const event of events) window.addEventListener(event, dismissReadingNotice, { capture: true, passive: true });
+    return () => {
+      for (const event of events) window.removeEventListener(event, dismissReadingNotice, true);
+    };
+  }, [dismissReadingNotice, loaded, notice]);
+
   const keyboardNavigationEnabled = !overlayMessage && !interactiveOverlay;
   return (
     <>
@@ -528,6 +539,7 @@ export function App() {
             key={loaded.book.id}
             loaded={loaded}
             onChooseBook={openEpubPicker}
+            onInteraction={dismissReadingNotice}
             onReturnToLibrary={returnToLibrary}
             settings={settings}
             onSaveSettings={saveSettings}

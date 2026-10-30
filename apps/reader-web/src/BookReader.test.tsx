@@ -507,6 +507,9 @@ describe("BookReader", () => {
     await user.keyboard("x");
     const topNext = Math.max(...scrollTo.mock.calls.map((call) => Number((call[0] as ScrollToOptions).top ?? 0)));
     expect(topNext).toBeGreaterThan(topPrevious);
+    const targetRow = document.getElementById("long-paragraph-4")?.closest<HTMLElement>("[data-virtual-row]");
+    // Preserve the requested 20px breathing room when aligning a paragraph at the top.
+    expect(topNext).toBe(parseFloat(targetRow!.style.top) - 20);
   });
 
   it("switches A and D instantly without calling View Transitions when the option is off", () => {
