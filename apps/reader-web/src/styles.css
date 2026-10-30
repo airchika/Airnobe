@@ -72,6 +72,11 @@
   font-display: swap;
 }
 
+html.cursor-idle,
+html.cursor-idle * {
+  cursor: none !important;
+}
+
 :root {
   color-scheme: dark;
   font-family: "Sarasa Gothic SC", "Microsoft YaHei UI", sans-serif;

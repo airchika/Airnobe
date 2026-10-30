@@ -38,6 +38,7 @@ import { NoveliaImportDialog } from "./NoveliaImportDialog.js";
 import { downloadNoveliaEpubFile } from "./novelia-client.js";
 import { loadDesktopSettings, saveDesktopAutostart, saveDesktopShortcut, type DesktopSettings } from "./desktop-settings.js";
 import { clearReaderSession, loadReaderSession, saveReaderSession } from "./reader-session.js";
+import { useIdleCursor } from "./use-idle-cursor.js";
 
 type BatchDuplicateAction = "ignore" | "replace" | "add";
 interface BatchDuplicateDecision { action: BatchDuplicateAction | "cancel"; bookId?: string; applyToRemaining?: boolean }
@@ -56,6 +57,7 @@ function mostRecentlyReadBookId(books: LibraryBook[]): string | undefined {
 }
 
 export function App() {
+  useIdleCursor();
   const initialDemo = new URLSearchParams(window.location.search).get("demo") === "1";
   const [initialReaderSession] = useState(() => initialDemo ? undefined : loadReaderSession());
   const [loaded, setLoaded] = useState<LoadedBook | undefined>(() => initialDemo ? createDemoBook() : undefined);
