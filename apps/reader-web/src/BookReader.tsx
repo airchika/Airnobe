@@ -661,17 +661,19 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
         void persistReadingPosition().catch(() => {});
       }, 750);
     };
-    const onVisibilityChange = (): void => {
-      if (document.visibilityState !== "hidden") return;
+    const flushPosition = (): void => {
       if (restoreCancelRef.current || activeAnchorRef.current || performance.now() < suppressProgressSaveUntilRef.current) return;
       if (progressSaveTimerRef.current !== undefined) window.clearTimeout(progressSaveTimerRef.current);
       void persistReadingPosition().catch(() => {});
     };
+    const onVisibilityChange = (): void => { if (document.visibilityState === "hidden") flushPosition(); };
     window.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", flushPosition);
     return () => {
       window.removeEventListener("scroll", onScroll);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", flushPosition);
       if (progressSaveTimerRef.current !== undefined) window.clearTimeout(progressSaveTimerRef.current);
       if (progressFrameRef.current !== undefined) cancelAnimationFrame(progressFrameRef.current);
       if (restoreFrameRef.current !== undefined) cancelAnimationFrame(restoreFrameRef.current);

@@ -641,7 +641,23 @@ describe("BookReader", () => {
       </StrictMode>,
     );
     fireEvent(document, new Event("visibilitychange"));
+    fireEvent(window, new Event("pagehide"));
     expect(savePosition).not.toHaveBeenCalled();
+  });
+
+  it("flushes the current position on pagehide without waiting for the scroll debounce", async () => {
+    vi.useFakeTimers();
+    const loaded = createDemoBook();
+    loaded.libraryBookId = "01234567-89ab-4cde-8fab-0123456789ab";
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} onSaveReadingPosition={save} />);
+    await act(async () => vi.advanceTimersByTime(100));
+    const anchors = [...document.querySelectorAll<HTMLElement>("[data-reading-anchor]")];
+    anchors.forEach((anchor, index) => Object.defineProperty(anchor, "getBoundingClientRect", { value: () => ({ top: index * 100 - 18, bottom: index * 100 + 62 }) }));
+    fireEvent.scroll(window);
+    expect(save).not.toHaveBeenCalled();
+    fireEvent(window, new Event("pagehide"));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ viewportOffset: -18, blockId: anchors[0]?.id }));
   });
 
   it("debounces progress saves and flushes the latest position before returning", async () => {

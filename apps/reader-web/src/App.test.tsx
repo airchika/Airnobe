@@ -5,6 +5,7 @@ import { App } from "./App.js";
 import type { LibraryBook } from "./library-client.js";
 import { DEFAULT_READER_SETTINGS } from "./reader-settings.js";
 import { createDemoBook } from "./demo-book.js";
+import { clearReaderSession, loadReaderSession, saveReaderSession } from "./reader-session.js";
 
 describe("App", () => {
   const bookId = "01234567-89ab-4cde-8fab-0123456789ab";
@@ -28,6 +29,7 @@ describe("App", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    clearReaderSession();
   });
 
   function json(value: unknown, status = 200): Response {
@@ -36,6 +38,55 @@ describe("App", () => {
       headers: { "content-type": "application/json" },
     });
   }
+
+  it("restores this tab's book and local position after reload, then stays in the library after explicitly returning", async () => {
+    const demo = createDemoBook();
+    const position = { documentId: demo.documents[0]!.id, blockId: demo.documents[0]!.blocks[0]!.id, viewportOffset: -36, progress: 0.2, chapterLabel: "第一章" };
+    const scrollBy = vi.spyOn(window, "scrollBy");
+    saveReaderSession(bookId, position);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/app-state") return json({ version: 2, lastReadingBookId: null, libraryFilter: "wish" });
+      if (url === "/api/library") return json({ version: 1, books: [libraryBook] });
+      if (url === `/api/books/${bookId}`) return json({ book: demo.book, documents: demo.documents, readingState: demo.readingState, bookmarkState: demo.bookmarkState });
+      if (url.endsWith("/reading-state") && init?.method === "PUT") return json({ version: 1, position: JSON.parse(String(init.body)).position, updatedAt: new Date().toISOString() });
+      return json({ error: "unexpected request" }, 404);
+    });
+    const first = render(<App />);
+    await waitFor(() => expect(document.querySelector(".reader-app")).toBeInTheDocument());
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 36, behavior: "instant" }));
+    expect(loadReaderSession()?.position).toEqual(position);
+    first.unmount();
+    const second = render(<App />);
+    await waitFor(() => expect(document.querySelector(".reader-app")).toBeInTheDocument());
+    fireEvent.keyDown(window, { key: "e", code: "KeyE" });
+    await waitFor(() => expect(document.querySelector(".reader-app")).not.toBeInTheDocument());
+    expect(loadReaderSession()).toBeUndefined();
+    second.unmount(); fetchMock.mockClear();
+    render(<App />);
+    await screen.findByRole("button", { name: "示例书籍" });
+    expect(document.querySelector(".reader-app")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/books/${bookId}`)).toBe(false);
+    demo.dispose();
+  });
+
+  it("falls back to an operable library when the tab's saved book is unavailable", async () => {
+    saveReaderSession(bookId, null);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/settings") return json(DEFAULT_READER_SETTINGS);
+      if (url === "/api/app-state") return json({ version: 2, lastReadingBookId: bookId, libraryFilter: "all" });
+      if (url === "/api/library") return json({ version: 1, books: [libraryBook] });
+      if (url === `/api/books/${bookId}`) return json({ error: "book missing" }, 404);
+      return json({ error: "unexpected request" }, 404);
+    });
+    render(<App />);
+    expect(await screen.findByText("无法恢复阅读")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "示例书籍" })).toBeInTheDocument();
+    expect(document.querySelector(".reader-app")).not.toBeInTheDocument();
+    expect(loadReaderSession()).toBeUndefined();
+  });
 
   it("opens into the minimal library view", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

@@ -37,6 +37,7 @@ import { toggleFullscreenState } from "./fullscreen.js";
 import { NoveliaImportDialog } from "./NoveliaImportDialog.js";
 import { downloadNoveliaEpubFile } from "./novelia-client.js";
 import { loadDesktopSettings, saveDesktopAutostart, saveDesktopShortcut, type DesktopSettings } from "./desktop-settings.js";
+import { clearReaderSession, loadReaderSession, saveReaderSession } from "./reader-session.js";
 
 type BatchDuplicateAction = "ignore" | "replace" | "add";
 interface BatchDuplicateDecision { action: BatchDuplicateAction | "cancel"; bookId?: string; applyToRemaining?: boolean }
@@ -56,6 +57,7 @@ function mostRecentlyReadBookId(books: LibraryBook[]): string | undefined {
 
 export function App() {
   const initialDemo = new URLSearchParams(window.location.search).get("demo") === "1";
+  const [initialReaderSession] = useState(() => initialDemo ? undefined : loadReaderSession());
   const [loaded, setLoaded] = useState<LoadedBook | undefined>(() => initialDemo ? createDemoBook() : undefined);
   const [libraryBooks, setLibraryBooks] = useState<LibraryBook[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<string>();
@@ -91,6 +93,7 @@ export function App() {
   const previousOverlayRef = useRef<string | undefined>(undefined);
   const duplicateResolverRef = useRef<((decision: BatchDuplicateDecision) => void) | undefined>(undefined);
   const importRunningRef = useRef(false);
+  const openRequestRef = useRef(0);
 
   useEffect(() => {
     loadedRef.current = loaded;
@@ -159,11 +162,29 @@ export function App() {
   useEffect(() => {
     if (initialDemo) return;
     let active = true;
+    const request = openRequestRef.current;
     void loadAppState()
       .catch(() => structuredClone(EMPTY_APP_STATE))
-      .then((state) => {
+      .then(async (state) => {
+        if (!active) return;
         setLibraryFilter(state.libraryFilter);
-        return refreshLibrary(undefined, state.lastReadingBookId, state.libraryFilter);
+        const books = await refreshLibrary(undefined, state.lastReadingBookId, state.libraryFilter);
+        if (!active || request !== openRequestRef.current || !initialReaderSession) return;
+        if (!books.some((book) => book.id === initialReaderSession.bookId)) { clearReaderSession(); return; }
+        setLoading("正在恢复阅读…");
+        try {
+          const book = await loadBookFromApi(initialReaderSession.bookId);
+          if (!active || request !== openRequestRef.current) { book.dispose(); return; }
+          // The synchronous tab checkpoint also covers a last save interrupted by reload.
+          book.readingState = { ...book.readingState, position: initialReaderSession.position };
+          setLastReadingBookId(initialReaderSession.bookId);
+          installBook(book);
+        } catch (restoreError) {
+          if (active && request === openRequestRef.current) {
+            clearReaderSession();
+            setOpenIssue({ title: "无法恢复阅读", message: (restoreError as Error).message });
+          }
+        } finally { if (active && request === openRequestRef.current) setLoading(undefined); }
       })
       .catch((libraryError) => {
         if (active) setError((libraryError as Error).message);
@@ -172,7 +193,7 @@ export function App() {
         if (active) setLibraryLoading(false);
       });
     return () => { active = false; };
-  }, [initialDemo, refreshLibrary]);
+  }, [initialDemo, initialReaderSession, refreshLibrary]);
 
   const openEpubPicker = (): void => {
     void chooseDesktopEpubFiles()
@@ -199,6 +220,8 @@ export function App() {
     const current = loadedRef.current;
     const bookId = current?.libraryBookId;
     if (!current || !bookId) return;
+    // Write before the first await; the page can disappear before the API responds.
+    saveReaderSession(bookId, position);
     try {
       setError(undefined);
       const state = await saveReadingPosition(bookId, position);
@@ -212,6 +235,8 @@ export function App() {
   }, []);
 
   const installBook = (next: LoadedBook): void => {
+    if (next.libraryBookId) saveReaderSession(next.libraryBookId, next.readingState.position);
+    else clearReaderSession();
     setLoaded((current) => {
       current?.dispose();
       return next;
@@ -220,6 +245,8 @@ export function App() {
   };
 
   const returnToLibrary = (): void => {
+    openRequestRef.current++;
+    clearReaderSession();
     setLoaded((current) => {
       current?.dispose();
       return undefined;
@@ -228,11 +255,13 @@ export function App() {
   };
 
   const readLibraryBook = async (bookId: string, mode: "continue" | "beginning" = "continue"): Promise<void> => {
+    const request = ++openRequestRef.current;
     setLoading("正在打开…");
     setError(undefined);
     setOpenIssue(undefined);
     try {
       const book = await loadBookFromApi(bookId);
+      if (request !== openRequestRef.current) { book.dispose(); return; }
       if (mode === "beginning") book.readingState = structuredClone(EMPTY_READING_STATE);
       setLastReadingBookId(bookId);
       installBook(book);
