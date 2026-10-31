@@ -460,7 +460,7 @@ export function App() {
   };
 
   const overlayMessage = loading ?? (libraryLoading && !loaded ? "正在加载书库…" : undefined);
-  const interactiveOverlay = settingsOpen ? "settings" : noveliaImportOpen ? "novelia" : duplicatePrompt ? "duplicate" : deletePrompt ? "delete" : error ? "error" : notice && !loaded ? "notice" : undefined;
+  const interactiveOverlay = settingsOpen ? "settings" : noveliaImportOpen ? "novelia" : duplicatePrompt ? "duplicate" : deletePrompt ? "delete" : error && !loaded ? "error" : notice && !loaded ? "notice" : undefined;
 
   const activateOverlayItem = useCallback((element: HTMLElement): boolean => {
     if (element.dataset.spatialAction !== "edit-duplicate-select") return false;
@@ -502,16 +502,16 @@ export function App() {
     previousOverlayRef.current = undefined;
   }, [interactiveOverlay]);
 
-  const dismissReadingNotice = useCallback(() => setNotice(undefined), []);
+  const dismissReadingFeedback = useCallback(() => { setNotice(undefined); setError(undefined); }, []);
   useEffect(() => {
-    if (!loaded || !notice) return;
+    if (!loaded || (!notice && !error)) return;
     // Observe input without consuming it: the same event still reaches the reader.
     const events = ["keydown", "pointerdown", "wheel", "touchstart"] as const;
-    for (const event of events) window.addEventListener(event, dismissReadingNotice, { capture: true, passive: true });
+    for (const event of events) window.addEventListener(event, dismissReadingFeedback, { capture: true, passive: true });
     return () => {
-      for (const event of events) window.removeEventListener(event, dismissReadingNotice, true);
+      for (const event of events) window.removeEventListener(event, dismissReadingFeedback, true);
     };
-  }, [dismissReadingNotice, loaded, notice]);
+  }, [dismissReadingFeedback, loaded, notice, error]);
 
   const keyboardNavigationEnabled = !overlayMessage && !interactiveOverlay;
   return (
@@ -539,7 +539,7 @@ export function App() {
             key={loaded.book.id}
             loaded={loaded}
             onChooseBook={openEpubPicker}
-            onInteraction={dismissReadingNotice}
+            onInteraction={dismissReadingFeedback}
             onReturnToLibrary={returnToLibrary}
             settings={settings}
             onSaveSettings={saveSettings}
@@ -670,7 +670,7 @@ export function App() {
       )}
       {error && !duplicatePrompt && !deletePrompt && (
         <div className="error-toast" role="alert">
-          <strong>无法打开</strong>
+          <strong>{loaded ? "操作失败" : "无法打开"}</strong>
           <span>{error}</span>
           <button type="button" data-spatial-item data-spatial-zone="toast" data-spatial-zone-order="0" data-spatial-row="0" onClick={() => setError(undefined)} aria-label="关闭错误">×</button>
         </div>

@@ -88,7 +88,7 @@ describe("App", () => {
     expect(loadReaderSession()).toBeUndefined();
   });
 
-  it.each(["keyboard", "gamepad", "wheel"])("dismisses a reading notice on %s input without blocking that input", async (inputKind) => {
+  it.each(["keyboard", "gamepad", "wheel"].flatMap((inputKind) => ["notice", "fullscreen-error"].map((feedback) => [inputKind, feedback])))("dismisses reading feedback on %s input after %s without blocking that input", async (inputKind, feedback) => {
     const demo = createDemoBook();
     saveReaderSession(bookId, null);
     const buttons = Array.from({ length: 16 }, () => ({ pressed: false, touched: false, value: 0 }));
@@ -109,14 +109,20 @@ describe("App", () => {
       render(<App />);
       await waitFor(() => expect(document.querySelector(".reader-app")).toBeInTheDocument());
       await waitFor(() => expect(getGamepads).toHaveBeenCalled());
-      fireEvent.change(screen.getByLabelText("选择 EPUB 文件"), { target: { files: [new File(["invalid"], "notes.txt", { type: "text/plain" })] } });
-      expect(await screen.findByText(/没有可导入的 EPUB/)).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "关闭提示" })).not.toHaveFocus();
+      const message = feedback === "notice" ? /没有可导入的 EPUB/ : /无法切换全屏/;
+      if (feedback === "notice") {
+        fireEvent.change(screen.getByLabelText("选择 EPUB 文件"), { target: { files: [new File(["invalid"], "notes.txt", { type: "text/plain" })] } });
+      } else {
+        // JSDOM has no Fullscreen API: the real fullscreen action takes its failure path.
+        fireEvent.keyDown(window, { key: "f", code: "KeyF" });
+      }
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: feedback === "notice" ? "关闭提示" : "关闭错误" })).not.toHaveFocus();
       scrollBy.mockClear();
       if (inputKind === "keyboard") fireEvent.keyDown(window, { key: "d", code: "KeyD" });
       else if (inputKind === "gamepad") buttons[15] = { pressed: true, touched: true, value: 1 };
       else fireEvent.wheel(window, { deltaY: 100 });
-      await waitFor(() => expect(screen.queryByText(/没有可导入的 EPUB/)).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText(message)).not.toBeInTheDocument());
       if (inputKind !== "wheel") expect(scrollBy).toHaveBeenCalledWith({ top: window.innerHeight, behavior: "instant" });
     } finally {
       delete (navigator as Partial<Navigator>).getGamepads;
