@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { BUILTIN_THEME_IDS, parseThemeDefinition, type ThemeDefinition } from "./src/themes.js";
+import { BUILTIN_THEME_IDS, isThemeId, parseThemeDefinition, type ThemeDefinition } from "./src/themes.js";
 
 export async function readCustomThemes(directory: string): Promise<ThemeDefinition[]> {
   let entries;
@@ -36,4 +36,9 @@ export async function writeCustomTheme(directory: string, theme: ThemeDefinition
     await rm(temporary, { force: true }).catch(() => {});
     throw new Error(`无法保存主题：${(error as Error).message}`);
   }
+}
+
+export async function deleteCustomTheme(directory: string, id: string): Promise<void> {
+  if (!isThemeId(id) || BUILTIN_THEME_IDS.has(id)) throw new Error("不能删除内置主题或无效主题。");
+  await rm(join(directory, `${id}.json`), { force: true });
 }

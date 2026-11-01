@@ -21,7 +21,7 @@ import {
 } from "./library-store.js";
 import { readReaderSettings, writeReaderSettings } from "./settings-store.js";
 import { readAppState, writeAppState } from "./app-state-store.js";
-import { readCustomThemes, writeCustomTheme } from "./theme-store.js";
+import { deleteCustomTheme, readCustomThemes, writeCustomTheme } from "./theme-store.js";
 import { parseReadingPosition, readingProgressSummary, type ReadingPosition } from "./src/reading-state.js";
 import { parseBookmarkDraft } from "./src/bookmarks.js";
 import { parseReaderSettings } from "./src/reader-settings.js";
@@ -535,6 +535,14 @@ export async function handleLocalApi(
       return;
     }
     const themeMatch = /^\/api\/themes\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/.exec(url.pathname);
+    if (request.method === "DELETE" && themeMatch) {
+      await enqueueMutation(async () => {
+        try { await deleteCustomTheme(THEMES_DIRECTORY, themeMatch[1] as string); }
+        catch (error) { throw new HttpError(400, (error as Error).message); }
+        await sendThemes(response);
+      });
+      return;
+    }
     if (request.method === "PUT" && themeMatch) {
       await enqueueMutation(() => importTheme(themeMatch[1] as string, request, response));
       return;

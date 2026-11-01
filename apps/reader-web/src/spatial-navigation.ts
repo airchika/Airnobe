@@ -1,4 +1,6 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
+
+import { useGamepadPaging, type GamepadAction } from "./use-gamepad-paging.js";
 
 export type SpatialDirection = "up" | "down" | "left" | "right";
 
@@ -6,6 +8,8 @@ interface SpatialNavigationOptions {
   rootRef: RefObject<HTMLElement | null>;
   enabled: boolean;
   editing?: boolean;
+  gamepad?: boolean;
+  onGamepadAction?(action: GamepadAction): void;
   onActivate?(element: HTMLElement): boolean | void;
   onCancel?(): boolean | void;
   resolveTarget?(items: HTMLElement[], current: HTMLElement, direction: SpatialDirection): HTMLElement | undefined;
@@ -84,10 +88,81 @@ function focusSpatialItem(element: HTMLElement): void {
   element.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-export function useSpatialNavigation({ rootRef, enabled, editing = false, onActivate, onCancel, resolveTarget, keys = "wasd" }: SpatialNavigationOptions): void {
+export function useSpatialNavigation({ rootRef, enabled, editing = false, gamepad = true, onGamepadAction, onActivate, onCancel, resolveTarget, keys = "wasd" }: SpatialNavigationOptions): void {
+  const adjustmentRef = useRef<HTMLElement | null>(null);
+  const stopAdjusting = (): void => {
+    adjustmentRef.current?.removeAttribute("data-gamepad-editing");
+    adjustmentRef.current = null;
+  };
+  useEffect(() => { if (!enabled) stopAdjusting(); return stopAdjusting; }, [enabled]);
+  const currentItem = (): HTMLElement | undefined => {
+    const root = rootRef.current;
+    if (!root || (document.querySelector(".theme-editor") && !root.classList.contains("theme-editor"))) return;
+    const items = spatialItems(root);
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>("[data-spatial-item]") : null;
+    return active && items.includes(active) ? active : items[0];
+  };
+  const adjustableControl = (item: HTMLElement): HTMLInputElement | HTMLSelectElement | null => {
+    if (item instanceof HTMLSelectElement) return item;
+    const select = item.querySelector<HTMLSelectElement>("select");
+    if (select) return select;
+    if (item instanceof HTMLInputElement && ["range", "number"].includes(item.type)) return item;
+    // Use the slider so adjustments use the same validated, automatically saved change handler.
+    return item.classList.contains("appearance-number-entry")
+      ? item.closest("label")?.querySelector<HTMLInputElement>('input[type="range"]') ?? null
+      : null;
+  };
+  useGamepadPaging(enabled && gamepad, (direction) => {
+    if (editing) return;
+    const current = currentItem();
+    const root = rootRef.current;
+    if (!current || !root) return;
+    const control = adjustmentRef.current === current ? adjustableControl(current) : null;
+    if (control) {
+      const delta = direction === "up" || direction === "right" ? 1 : -1;
+      if (control instanceof HTMLSelectElement) {
+        const options = [...control.options].filter((option) => !option.disabled);
+        const index = options.findIndex((option) => option.value === control.value);
+        const next = options[Math.max(0, Math.min(options.length - 1, index + delta))];
+        if (next) { control.value = next.value; control.dispatchEvent(new Event("change", { bubbles: true })); }
+      } else {
+        const step = Number(control.step) || 1;
+        const value = Math.max(control.min === "" ? -Infinity : Number(control.min), Math.min(control.max === "" ? Infinity : Number(control.max), Number(control.value) + delta * step));
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(control, String(Number(value.toFixed(6))));
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+        control.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return;
+    }
+    stopAdjusting();
+    const target = resolveTarget ? resolveTarget(spatialItems(root), current, direction) : findSpatialTarget(spatialItems(root), current, direction);
+    if (target) focusSpatialItem(target);
+  }, (action) => {
+    if (document.querySelector(".theme-editor") && !rootRef.current?.classList.contains("theme-editor")) return;
+    if (action === "toggleSidebar") { stopAdjusting(); onCancel?.(); return; }
+    if (action === "topBackward") {
+      if (adjustmentRef.current) { stopAdjusting(); return; }
+      onCancel?.();
+      return;
+    }
+    if (action !== "topForward") { onGamepadAction?.(action); return; }
+    if (editing) return;
+    const current = currentItem();
+    if (!current) return;
+    if (adjustmentRef.current) { stopAdjusting(); return; }
+    if (adjustableControl(current)) {
+      focusSpatialItem(current);
+      adjustmentRef.current = current;
+      current.setAttribute("data-gamepad-editing", "true");
+      return;
+    }
+    if (onActivate?.(current)) return;
+    current.click();
+  }, true);
   useEffect(() => {
     if (!enabled) return;
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (document.querySelector(".theme-editor") && !rootRef.current?.classList.contains("theme-editor")) return;
       if (editing || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) return;
@@ -111,7 +186,7 @@ export function useSpatialNavigation({ rootRef, enabled, editing = false, onActi
       }
       if (!direction && event.code !== "Space" && event.code !== "Enter") return;
       const root = rootRef.current;
-      if (!root) return;
+      if (!root || (document.querySelector(".theme-editor") && !root.classList.contains("theme-editor"))) return;
       const items = spatialItems(root);
       if (items.length === 0) return;
       const active = document.activeElement instanceof HTMLElement

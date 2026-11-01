@@ -85,8 +85,8 @@ describe("useGamepadPaging", () => {
 
   it.each([
     [0, "topForward"], [1, "topBackward"], [2, "toggleJapanese"],
-    [4, "toggleAssistedRuby"], [5, "toggleKatakanaRomaji"],
-    [7, "toggleFullscreen"], [3, "returnLibrary"],
+    [5, "toggleAssistedRuby"], [4, "toggleKatakanaRomaji"],
+    [3, "toggleSidebar"], [7, "toggleFullscreen"], [6, "returnLibrary"],
   ] as const)("maps button %i to %s once per press", (index, expected) => {
     const action = vi.fn();
     const page = vi.fn();
@@ -131,7 +131,7 @@ describe("useGamepadPaging", () => {
     const page = vi.fn();
     renderHook(() => useGamepadPaging(true, page, action));
     tick();
-    button(3, true);
+    button(6, true);
     button(0, true);
     button(13, true);
     tick(1_000);

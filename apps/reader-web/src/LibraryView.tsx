@@ -50,12 +50,12 @@ function nearestHorizontal(items: HTMLElement[], current: HTMLElement): HTMLElem
 
 function resolveLibrarySpatialTarget(items: HTMLElement[], current: HTMLElement, direction: SpatialDirection): HTMLElement | undefined {
   const isHeaderAction = current.hasAttribute("data-library-header-action");
-  const isBodyTop = current.dataset.spatialRow === "0" && ["filters", "books"].includes(current.dataset.spatialZone ?? "");
+  const isBodyTop = (current.dataset.spatialZone === "filters" && current.dataset.spatialRow === "0") || (current.dataset.spatialZone === "books" && current.dataset.spatialRow === "-1");
   if (direction === "up" && isBodyTop) {
     return nearestHorizontal(items.filter((item) => item.hasAttribute("data-library-header-action")), current) ?? current;
   }
   if (direction === "down" && isHeaderAction) {
-    return nearestHorizontal(items.filter((item) => item.dataset.spatialRow === "0" && ["filters", "books"].includes(item.dataset.spatialZone ?? "")), current) ?? current;
+    return nearestHorizontal(items.filter((item) => (item.dataset.spatialZone === "filters" && item.dataset.spatialRow === "0") || (item.dataset.spatialZone === "books" && item.dataset.spatialRow === "-1")), current) ?? current;
   }
   return findSpatialTarget(items, current, direction);
 }
@@ -216,13 +216,13 @@ export function LibraryView({ books, selectedBookId, filter, onFilterChange, onS
   }, [popupOpen]);
   const openStatusMenu = (): void => { setStatusMenuOpen(true); requestAnimationFrame(() => popupRef.current?.querySelector<HTMLElement>("[aria-selected]")?.focus({ preventScroll: true })); };
 
-  useSpatialNavigation({ rootRef, enabled: keyboardNavigationEnabled && !popupOpen, keys: "both", resolveTarget: resolveLibrarySpatialTarget, onActivate: (element) => {
+  useSpatialNavigation({ gamepad: false, rootRef, enabled: keyboardNavigationEnabled && !popupOpen, keys: "both", resolveTarget: resolveLibrarySpatialTarget, onActivate: (element) => {
     if (element.dataset.spatialAction !== "book-actions") return false;
     const book = books.find((candidate) => candidate.id === element.dataset.libraryBookId);
     if (book) openActionPopup(book, element);
     return true;
   } });
-  useSpatialNavigation({ rootRef: popupRef, enabled: keyboardNavigationEnabled && popupOpen, keys: "both", onCancel: () => { if (statusMenuOpen) { setStatusMenuOpen(false); requestAnimationFrame(() => popupRef.current?.querySelector<HTMLElement>("[data-popup-action='status']")?.focus({ preventScroll: true })); return true; } closePopup(); return true; } });
+  useSpatialNavigation({ gamepad: false, rootRef: popupRef, enabled: keyboardNavigationEnabled && popupOpen, keys: "both", onCancel: () => { if (statusMenuOpen) { setStatusMenuOpen(false); requestAnimationFrame(() => popupRef.current?.querySelector<HTMLElement>("[data-popup-action='status']")?.focus({ preventScroll: true })); return true; } closePopup(); return true; } });
   const gamepadCurrentItem = (): HTMLElement | undefined => {
     const root = popupOpen ? popupRef.current : rootRef.current;
     if (!root) return undefined;
@@ -290,7 +290,7 @@ export function LibraryView({ books, selectedBookId, filter, onFilterChange, onS
         {STATUS_ORDER.map((status, index) => <button key={status} type="button" data-spatial-item data-spatial-zone="filters" data-spatial-zone-order="0" data-spatial-row={String(index + 1)} data-library-filter={status} aria-pressed={filter === status} onFocus={() => activateFilter(status)} onClick={() => activateFilter(status)}><span>{STATUS_LABELS[status]}</span><b>{books.filter((book) => book.collectionStatus === status).length}</b></button>)}
       </nav>
       <section className="library-list" aria-label="书籍列表">
-        <div className="library-list-header">{([ ["title", "书名"], ["status", "状态"], ["recent", "最近打开"] ] as const).map(([key, label]) => <button key={key} type="button" onClick={() => chooseSort(key)} aria-pressed={sort.key === key}>{label}{key === "status" ? <i className="library-sort-slot" aria-hidden="true">{sort.key === key ? (sort.direction === 1 ? "↑" : "↓") : "↑"}</i> : sortLabel(key)}</button>)}</div>
+        <div className="library-list-header">{([ ["title", "书名"], ["status", "状态"], ["recent", "最近打开"] ] as const).map(([key, label]) => <button key={key} type="button" data-spatial-item data-spatial-zone="books" data-spatial-zone-order="1" data-spatial-row="-1" onClick={() => chooseSort(key)} aria-pressed={sort.key === key}>{label}{key === "status" ? <i className="library-sort-slot" aria-hidden="true">{sort.key === key ? (sort.direction === 1 ? "↑" : "↓") : "↑"}</i> : sortLabel(key)}</button>)}</div>
         {visibleBooks.length === 0 ? <p className="library-empty">{books.length === 0 ? "书库为空" : "此分类暂无书籍"}</p> : visibleBooks.map((book, index) => <div className="library-row" data-selected={book.id === selectedBookId} key={book.id} onClick={() => onSelect(book.id)} onContextMenu={(event) => { event.preventDefault(); openActionPopup(book, event.currentTarget, { x: event.clientX, y: event.clientY }); }}>
           <button className={`library-row-title ${metadataLanguageClass(book, book.title) ?? ""}`} type="button" data-spatial-item data-spatial-zone="books" data-spatial-zone-order="1" data-spatial-row={String(index)} data-spatial-action="book-actions" data-library-book-id={book.id} onFocus={() => onSelect(book.id)} onDoubleClick={() => onRead(book.id)}>{book.title || "未命名书籍"}</button>
           <span className="library-row-status">{STATUS_LABELS[book.collectionStatus]}</span>

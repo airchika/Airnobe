@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BUILTIN_THEMES } from "./src/themes.js";
-import { readCustomThemes, writeCustomTheme } from "./theme-store.js";
+import { deleteCustomTheme, readCustomThemes, writeCustomTheme } from "./theme-store.js";
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))));
@@ -19,6 +19,17 @@ describe("theme store", () => {
     await writeCustomTheme(directory, theme);
     expect(await readCustomThemes(directory)).toEqual([theme]);
     expect(JSON.parse(await readFile(join(directory, "custom-night.json"), "utf8"))).toEqual(theme);
+  });
+
+  it("deletes only valid custom theme files", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "airnobe-themes-"));
+    temporaryDirectories.push(directory);
+    const theme = { ...structuredClone(BUILTIN_THEMES[0]!), id: "custom-delete" };
+    await writeCustomTheme(directory, theme);
+    await expect(deleteCustomTheme(directory, "../outside")).rejects.toThrow();
+    await expect(deleteCustomTheme(directory, BUILTIN_THEMES[0]!.id)).rejects.toThrow();
+    await deleteCustomTheme(directory, theme.id);
+    expect(await readCustomThemes(directory)).toEqual([]);
   });
 
   it("ignores damaged files and refuses to replace built-ins", async () => {

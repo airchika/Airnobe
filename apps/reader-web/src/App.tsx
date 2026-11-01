@@ -504,14 +504,14 @@ export function App() {
 
   const dismissReadingFeedback = useCallback(() => { setNotice(undefined); setError(undefined); }, []);
   useEffect(() => {
-    if (!loaded || (!notice && !error)) return;
+    if (!loaded) return;
     // Observe input without consuming it: the same event still reaches the reader.
     const events = ["keydown", "pointerdown", "wheel", "touchstart"] as const;
     for (const event of events) window.addEventListener(event, dismissReadingFeedback, { capture: true, passive: true });
     return () => {
       for (const event of events) window.removeEventListener(event, dismissReadingFeedback, true);
     };
-  }, [dismissReadingFeedback, loaded, notice, error]);
+  }, [dismissReadingFeedback, loaded]);
 
   const keyboardNavigationEnabled = !overlayMessage && !interactiveOverlay;
   return (

@@ -376,6 +376,34 @@ describe("BookReader", () => {
     expect(await screen.findByText("已取消书签")).toBeInTheDocument();
   });
 
+  it("keeps a temporary return location with its viewport offset when jumping from a bookmark", async () => {
+    const loaded = createLongBook(30);
+    loaded.bookmarkState = { version: 1, bookmarks: [{
+      id: "11234567-89ab-4cde-8fab-0123456789ab",
+      position: { documentId: loaded.documents[0]!.id, blockId: "long-paragraph-4", viewportOffset: 20, progress: 4 / 29, chapterLabel: null },
+      excerpt: "目标书签", createdAt: "2026-08-09T00:00:00.000Z",
+    }] };
+    const scrollBy = vi.spyOn(window, "scrollBy");
+    const add = vi.fn();
+    render(<BookReader loaded={loaded} onChooseBook={() => {}} onReturnToLibrary={() => {}} {...readerSettingsProps} onAddBookmark={add} settings={{ ...DEFAULT_READER_SETTINGS, pageTransitions: false }} />);
+    openReaderMenu();
+    let originTop = -17;
+    for (const element of document.querySelectorAll<HTMLElement>("[data-reading-anchor]")) {
+      Object.defineProperty(element, "getBoundingClientRect", { configurable: true, value: () => ({ top: element.id === "long-paragraph-0" ? originTop : 200, bottom: element.id === "long-paragraph-0" ? originTop + 100 : 300 }) });
+    }
+    expect(screen.queryByRole("button", { name: /返回跳转前位置/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^目标书签/ }));
+    const back = screen.getByRole("button", { name: /返回跳转前位置/ });
+    expect(back).toHaveAttribute("data-spatial-item");
+    expect(add).not.toHaveBeenCalled();
+    originTop = 80;
+    scrollBy.mockClear();
+    fireEvent.click(back);
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 97, behavior: "instant" }));
+    expect(screen.queryByRole("button", { name: /返回跳转前位置/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^目标书签/ })).toBeInTheDocument();
+  });
+
   it("jumps to an unmounted bookmarked virtual row", async () => {
     const loaded = createLongBook(200);
     loaded.bookmarkState = { version: 1, bookmarks: [{

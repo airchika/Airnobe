@@ -363,6 +363,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
   const [pinnedAnchorIndex, setPinnedAnchorIndex] = useState<number>();
   const readerRootRef = useRef<HTMLDivElement>(null);
   const sidebarRootRef = useRef<HTMLDivElement>(null);
+  const [bookmarkReturnPosition, setBookmarkReturnPosition] = useState<ReadingPosition>();
   const shortcutDialogRef = useRef<HTMLDivElement>(null);
   const shortcutButtonRef = useRef<HTMLButtonElement>(null);
   const overlayReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -814,11 +815,14 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     bookmarkNoticeTimerRef.current = window.setTimeout(() => setBookmarkNotice(undefined), 1_800);
   }, []);
 
-  const jumpToReadingPosition = useCallback((position: ReadingPosition) => {
+  const jumpToReadingPosition = useCallback((position: ReadingPosition, rememberOrigin = false) => {
     const targetIndex = rowIndexByBlockId.get(position.blockId);
     if (targetIndex === undefined) return;
     restoreCancelRef.current?.();
     performViewChange(() => {
+      // Capture only when the jump is accepted, before changing the viewport.
+      if (rememberOrigin) setBookmarkReturnPosition(captureReadingPosition());
+      else setBookmarkReturnPosition(undefined);
       setCurrentRowIndex(targetIndex);
       setPinnedAnchorIndex(targetIndex);
       virtualizer.scrollToIndex(targetIndex, { align: "start", behavior: "instant" });
@@ -836,7 +840,7 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       };
       requestAnimationFrame(align);
     });
-  }, [performViewChange, rowIndexByBlockId, virtualizer]);
+  }, [captureReadingPosition, performViewChange, rowIndexByBlockId, virtualizer]);
 
   const addCurrentBookmark = useCallback(async () => {
     if (!loaded.libraryBookId || !onAddBookmark || !onDeleteBookmark) {
@@ -1011,20 +1015,23 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
     else if (action === "toggleJapanese") toggleJapanese();
     else if (action === "toggleAssistedRuby") toggleAssistedRuby();
     else if (action === "toggleKatakanaRomaji") toggleKatakanaRomaji();
+    else if (action === "toggleSidebar") toggleSidebar();
     else if (action === "toggleFullscreen") toggleFullscreen();
     else if (action === "returnLibrary") void returnToLibrary();
   });
 
   useSpatialNavigation({
     rootRef: sidebarRootRef,
+    onCancel: () => { closeSidebar(); return true; },
+    onGamepadAction: (action) => { if (action === "toggleFullscreen") toggleFullscreen(); else if (action === "returnLibrary") void returnToLibrary(); },
     enabled: sidebarOpen && !shortcutDialogOpen && keyboardNavigationEnabled,
     keys: "arrows",
   });
-  useSpatialNavigation({ rootRef: shortcutDialogRef, enabled: shortcutDialogOpen && keyboardNavigationEnabled, editing: Boolean(capturingAction), keys: "both" });
+  useSpatialNavigation({ rootRef: shortcutDialogRef, onCancel: () => { if (capturingAction) setCapturingAction(undefined); else closeShortcutDialog(); return true; }, enabled: shortcutDialogOpen && keyboardNavigationEnabled, editing: Boolean(capturingAction), keys: "both" });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!keyboardNavigationEnabled) return;
+      if (!keyboardNavigationEnabled || document.querySelector(".theme-editor")) return;
       if (capturingAction) {
         if (event.key === "Tab") {
           setCapturingAction(undefined);
@@ -1240,14 +1247,17 @@ export function BookReader({ loaded, onReturnToLibrary, settings, onSaveSettings
       {sidebarOpen && <div className="reader-sidebar" ref={sidebarRootRef} aria-label="阅读侧边栏">
         <aside className="reader-sidebar-toc" aria-label="目录"><header><strong>目录</strong><button type="button" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row="0" aria-label="关闭侧边栏" onClick={() => closeSidebar()}>×</button></header>
           <ol className="toc-list">{tocEntries.map((entry, index) => <li key={entry.key} style={{ paddingLeft: `${10 + entry.depth * 16}px` }}>{entry.targetIndex === undefined ? <span>{entry.label}</span> : <button type="button" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(index + 1)} data-toc-key={entry.key} aria-current={activeTocEntry?.key === entry.key ? "location" : undefined} onClick={() => followTocEntry(entry)}>{entry.label}</button>}</li>)}</ol>
-          <section className="reader-bookmarks" aria-label="书签"><div className="reader-bookmarks-heading"><strong>书签</strong><button type="button" className="bookmark-add" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(tocEntries.length + 1)} aria-label="添加或取消当前位置书签" title="添加或取消当前位置书签" onClick={() => void addCurrentBookmark()}>+</button></div><ol>{bookmarkEntries.map((entry, index) => <li key={entry.bookmark.id}><button type="button" className="bookmark-delete" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(tocEntries.length + index + 2)} aria-label={`删除书签：${entry.bookmark.excerpt}`} onClick={() => void deleteSavedBookmark(entry.bookmark.id)}>×</button><button type="button" className="bookmark-target" data-bookmark-id={entry.bookmark.id} data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(tocEntries.length + index + 2)} onClick={() => jumpToReadingPosition(entry.bookmark.position)}><span>{entry.bookmark.excerpt}</span><small>{entry.chapterLabel ? `${entry.chapterLabel} · ` : ""}{Math.round(entry.progress * 100)}%</small></button></li>)}</ol></section>
+          <section className="reader-bookmarks" aria-label="书签"><div className="reader-bookmarks-heading"><strong>书签</strong><button type="button" className="bookmark-add" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(tocEntries.length + 1)} aria-label="添加或取消当前位置书签" title="添加或取消当前位置书签" onClick={() => void addCurrentBookmark()}>+</button></div><ol>{bookmarkReturnPosition && <li><button type="button" className="bookmark-target" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(tocEntries.length + 2)} onClick={() => {
+            jumpToReadingPosition(bookmarkReturnPosition);
+            requestAnimationFrame(() => sidebarRootRef.current?.querySelector<HTMLElement>(".bookmark-add")?.focus({ preventScroll: true }));
+          }}><span>返回跳转前位置</span><small>临时 · {bookmarkReturnPosition.chapterLabel ? `${bookmarkReturnPosition.chapterLabel} · ` : ""}{Math.round(bookmarkReturnPosition.progress * 100)}%</small></button></li>}{bookmarkEntries.map((entry, index) => <li key={entry.bookmark.id}><button type="button" className="bookmark-delete" data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(tocEntries.length + index + 3)} aria-label={`删除书签：${entry.bookmark.excerpt}`} onClick={() => void deleteSavedBookmark(entry.bookmark.id)}>×</button><button type="button" className="bookmark-target" data-bookmark-id={entry.bookmark.id} data-spatial-item data-spatial-zone="toc" data-spatial-zone-order="0" data-spatial-row={String(tocEntries.length + index + 3)} onClick={() => jumpToReadingPosition(entry.bookmark.position, true)}><span>{entry.bookmark.excerpt}</span><small>{entry.chapterLabel ? `${entry.chapterLabel} · ` : ""}{Math.round(entry.progress * 100)}%</small></button></li>)}</ol></section>
           {settings.appearance.display.showProgressBars && <div className="reader-progress-summary">{chapterProgress !== undefined && <label><span>{activeTocEntry?.label ?? "当前章节"}</span><b>{Math.round(chapterProgress * 100)}%</b><progress max="1" value={chapterProgress} /></label>}<label><span>全书</span><b>{Math.round(wholeProgress * 100)}%</b><progress max="1" value={wholeProgress} /></label></div>}
         </aside>
         <aside className="reader-sidebar-settings" aria-label="阅读设置" data-spatial-zone-order="1"><div className="sidebar-top-actions"><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-zone-order="1" data-spatial-row="0" aria-pressed={fullscreen} onClick={toggleFullscreen}>{fullscreen ? "退出全屏" : "全屏"}</button><button type="button" data-spatial-item data-spatial-zone="settings" data-spatial-zone-order="1" data-spatial-row="0" onClick={() => void returnToLibrary()}>返回书库</button><button ref={shortcutButtonRef} type="button" data-spatial-item data-spatial-zone="settings" data-spatial-zone-order="1" data-spatial-row="0" onClick={openShortcutDialog}>设置快捷键</button></div>
           <SettingsPanel embedded scope="reader" settings={settings} themes={themes} onPreview={(next) => { beginLayoutAnchorLock(); onPreviewSettings(next); }} onSave={onSaveSettings} onImport={onImportTheme} onThemesChange={onThemesChange} />
         </aside>
       </div>}
-      {shortcutDialogOpen && <div className="shortcut-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShortcutDialog(); }}><div className="shortcut-dialog" ref={shortcutDialogRef} role="dialog" aria-modal="true" aria-label="快捷键设置"><header><h2>快捷键</h2><button type="button" aria-label="关闭快捷键设置" onClick={closeShortcutDialog}>×</button></header><div className="shortcut-dialog-columns"><ShortcutColumn title="阅读导航" actions={NAVIGATION_SHORTCUT_ACTIONS} zone="shortcut-navigation" zoneOrder="0" shortcuts={shortcuts} capturingAction={capturingAction} onCapture={beginShortcutCapture} /><ShortcutColumn title="显示与应用" actions={DISPLAY_SHORTCUT_ACTIONS} zone="shortcut-display" zoneOrder="1" shortcuts={shortcuts} capturingAction={capturingAction} onCapture={beginShortcutCapture} /></div>{bindingError && <p className="reader-menu-error" role="alert">{bindingError}</p>}</div></div>}
+      {shortcutDialogOpen && <div className="shortcut-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShortcutDialog(); }}><div className="shortcut-dialog" ref={shortcutDialogRef} role="dialog" aria-modal="true" aria-label="快捷键设置"><header><h2>快捷键</h2><button type="button" aria-label="关闭快捷键设置" data-spatial-item data-spatial-zone="shortcut-navigation" data-spatial-zone-order="0" data-spatial-row="-1" onClick={closeShortcutDialog}>×</button></header><div className="shortcut-dialog-columns"><ShortcutColumn title="阅读导航" actions={NAVIGATION_SHORTCUT_ACTIONS} zone="shortcut-navigation" zoneOrder="0" shortcuts={shortcuts} capturingAction={capturingAction} onCapture={beginShortcutCapture} /><ShortcutColumn title="显示与应用" actions={DISPLAY_SHORTCUT_ACTIONS} zone="shortcut-display" zoneOrder="1" shortcuts={shortcuts} capturingAction={capturingAction} onCapture={beginShortcutCapture} /></div>{bindingError && <p className="reader-menu-error" role="alert">{bindingError}</p>}</div></div>}
       {bookmarkNotice && <div className="reader-bookmark-notice" role="status" aria-live="polite">{bookmarkNotice}</div>}
     </div>
   );

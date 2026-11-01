@@ -7,10 +7,11 @@ export const GAMEPAD_ACTIONS = [
   { button: 0, action: "topForward" },
   { button: 1, action: "topBackward" },
   { button: 2, action: "toggleJapanese" },
-  { button: 4, action: "toggleAssistedRuby" },
-  { button: 5, action: "toggleKatakanaRomaji" },
+  { button: 5, action: "toggleAssistedRuby" },
+  { button: 4, action: "toggleKatakanaRomaji" },
+  { button: 3, action: "toggleSidebar" },
   { button: 7, action: "toggleFullscreen" },
-  { button: 3, action: "returnLibrary" },
+  { button: 6, action: "returnLibrary" },
 ] as const;
 export type GamepadAction = typeof GAMEPAD_ACTIONS[number]["action"];
 
@@ -31,7 +32,7 @@ function direction(pad: Gamepad): Direction {
   return axisIndex % 2 === 0 ? strongest < 0 ? "left" : "right" : strongest < 0 ? "up" : "down";
 }
 
-export function useGamepadPaging(enabled: boolean, onPage: (direction: GamepadDirection) => void, onAction?: (action: GamepadAction) => void): void {
+export function useGamepadPaging(enabled: boolean, onPage: (direction: GamepadDirection) => void, onAction?: (action: GamepadAction) => void, allowFormControls = false): void {
   const onPageRef = useRef(onPage);
   onPageRef.current = onPage;
   const onActionRef = useRef(onAction);
@@ -48,7 +49,7 @@ export function useGamepadPaging(enabled: boolean, onPage: (direction: GamepadDi
     const timer = window.setInterval(() => {
       const target = document.activeElement as HTMLElement | null;
       if (!document.hasFocus() || document.visibilityState !== "visible"
-        || target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) {
+        || (!allowFormControls && (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")))) {
         reset();
         return;
       }
@@ -67,6 +68,7 @@ export function useGamepadPaging(enabled: boolean, onPage: (direction: GamepadDi
       }
       const actions = GAMEPAD_ACTIONS.filter(({ button }) => pressed.has(button) && !pressedButtons.has(button));
       pressedButtons = pressed;
+      if (current || actions.length) document.documentElement.dataset.inputMode = "gamepad";
       // Returning takes priority over simultaneous page/display changes.
       if (actions.some(({ action }) => action === "returnLibrary")) {
         reset();
@@ -85,12 +87,15 @@ export function useGamepadPaging(enabled: boolean, onPage: (direction: GamepadDi
         onPageRef.current(current);
       }
     }, 50);
+    const clearGamepadFocus = (): void => { delete document.documentElement.dataset.inputMode; };
+    window.addEventListener("pointerdown", clearGamepadFocus, true);
     window.addEventListener("blur", reset);
     document.addEventListener("visibilitychange", reset);
     return () => {
       window.clearInterval(timer);
+      window.removeEventListener("pointerdown", clearGamepadFocus, true);
       window.removeEventListener("blur", reset);
       document.removeEventListener("visibilitychange", reset);
     };
-  }, [enabled]);
+  }, [enabled, allowFormControls]);
 }

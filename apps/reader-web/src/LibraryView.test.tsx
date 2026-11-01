@@ -51,7 +51,7 @@ describe("LibraryView", () => {
       expect(onToggleFullscreen).not.toHaveBeenCalled();
       press(7);
       expect(onToggleFullscreen).toHaveBeenCalledOnce();
-      press(3);
+      press(6);
       expect(onReturnToReading).toHaveBeenCalledOnce();
     } finally {
       focus.mockRestore();
@@ -108,6 +108,8 @@ describe("LibraryView", () => {
     expect(allFilter).toHaveFocus();
 
     firstBook.focus();
+    fireEvent.keyDown(window, { key: "ArrowUp", code: "ArrowUp" });
+    expect(screen.getByRole("button", { name: "书名" })).toHaveFocus();
     fireEvent.keyDown(window, { key: "ArrowUp", code: "ArrowUp" });
     expect(importButton).toHaveFocus();
   });

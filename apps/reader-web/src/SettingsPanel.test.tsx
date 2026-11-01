@@ -3,9 +3,28 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseThemeClipboard, SettingsPanel } from "./SettingsPanel.js";
 import { DEFAULT_READER_SETTINGS } from "./reader-settings.js";
 import { builtinThemeOptions } from "./theme-client.js";
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.removeItem("airnobe.typography-collapsed"); });
 const props = { settings: DEFAULT_READER_SETTINGS, themes: builtinThemeOptions(), onSave: async () => {}, onImport: async () => { throw new Error("unused"); }, onThemesChange: () => {}, onClose: () => {} };
 describe("SettingsPanel", () => {
+  it("remembers typography folding through weight while leaving display toggles visible", () => {
+    localStorage.removeItem("airnobe.typography-collapsed");
+    const view = render(<SettingsPanel {...props} onPreview={() => {}} />);
+    const toggle = screen.getByRole("button", { name: "排版与样式" });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("combobox", { name: "中文字体" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "粗体" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "显示日文关" })).toBeVisible();
+    view.unmount();
+    render(<SettingsPanel {...props} onPreview={() => {}} />);
+    expect(screen.getByRole("button", { name: "排版与样式" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "排版与样式" }));
+    expect(screen.getByRole("button", { name: "粗体" })).toBeVisible();
+    const add = screen.getByRole("button", { name: "自定义主题" });
+    expect(add.closest(".settings-section-heading")).not.toBeNull();
+    expect(add.querySelector("svg")).not.toBeNull();
+    localStorage.removeItem("airnobe.typography-collapsed");
+  });
   it("previews and saves Chinese and Japanese font choices independently", async () => {
     const preview = vi.fn();
     const save = vi.fn(async () => {});
@@ -20,7 +39,7 @@ describe("SettingsPanel", () => {
   it("supports bold weight, Chinese opacity and limits navigation steps to ten", () => { const preview = vi.fn(); render(<SettingsPanel {...props} scope="reader" onPreview={preview} />); fireEvent.click(screen.getByRole("button", { name: "粗体" })); expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ appearance: expect.objectContaining({ typography: expect.objectContaining({ fontWeight: 800 }) }) })); expect(screen.getByRole("spinbutton", { name: "中文透明度" })).toHaveAttribute("min", "0.2"); expect(screen.getByRole("spinbutton", { name: "滚动段数" })).toHaveAttribute("max", "10"); fireEvent.change(screen.getByLabelText("滚动段数滑块"), { target: { value: "7" } }); expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ navigation: { textSteps: 7 } })); expect(screen.queryByRole("button", { name: /显示滚动条/ })).not.toBeInTheDocument(); });
   it("parses raw or fenced v4 themes from the clipboard", () => { const raw = JSON.stringify(builtinThemeOptions()[0]!.theme); expect(parseThemeClipboard(raw).version).toBe(4); expect(parseThemeClipboard(`\`\`\`json\n${raw}\n\`\`\``).id).toBe(builtinThemeOptions()[0]!.theme.id); expect(() => parseThemeClipboard("not json")).toThrow(/有效/); });
   it("commits number edits with Enter and restores them with Escape", async () => { const preview = vi.fn(); const save = vi.fn(async () => {}); render(<SettingsPanel {...props} scope="reader" onPreview={preview} onSave={save} />); const input = screen.getByRole("spinbutton", { name: "字号" }); fireEvent.focus(input); fireEvent.change(input, { target: { value: "25" } }); fireEvent.keyDown(input, { key: "Escape", code: "Escape" }); expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ appearance: expect.objectContaining({ typography: expect.objectContaining({ fontSize: 19 }) }) })); fireEvent.focus(input); fireEvent.change(input, { target: { value: "24" } }); fireEvent.keyDown(input, { key: "Enter", code: "Enter" }); expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ appearance: expect.objectContaining({ typography: expect.objectContaining({ fontSize: 24 }) }) })); });
-  it("shows the prompt-copy and clipboard-import theme actions", () => { render(<SettingsPanel {...props} scope="library" onPreview={() => {}} />); expect(screen.getByRole("button", { name: "复制导入主题提示词" })).toBeInTheDocument(); expect(screen.getByRole("button", { name: "从剪贴板导入主题" })).toBeInTheDocument(); expect(screen.queryByRole("button", { name: "导入主题 JSON" })).not.toBeInTheDocument(); });
+  it("shows custom theme and clipboard-import actions", () => { render(<SettingsPanel {...props} scope="library" onPreview={() => {}} />); expect(screen.queryByRole("button", { name: "复制导入主题提示词" })).not.toBeInTheDocument(); expect(screen.getByRole("button", { name: "自定义主题" })).toBeInTheDocument(); expect(screen.queryByRole("button", { name: "从剪贴板导入主题" })).not.toBeInTheDocument(); expect(screen.queryByRole("button", { name: "导入主题 JSON" })).not.toBeInTheDocument(); });
   it("edits the shared library/reader switch shortcut from library settings", async () => {
     const preview = vi.fn();
     const save = vi.fn(async () => {});

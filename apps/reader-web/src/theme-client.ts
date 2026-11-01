@@ -51,3 +51,7 @@ export async function importTheme(theme: ThemeDefinition): Promise<AvailableThem
 export function builtinThemeOptions(): AvailableTheme[] {
   return BUILTIN_THEMES.map((theme) => ({ theme, builtin: true }));
 }
+
+export async function deleteTheme(id: string): Promise<AvailableTheme[]> {
+  return parseThemeList(await responseJson(await apiFetch(`/api/themes/${encodeURIComponent(id)}`, { method: "DELETE" })));
+}
